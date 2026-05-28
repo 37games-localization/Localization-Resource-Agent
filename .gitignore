@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
+*.eml
+output/
+drafts/
+.loc-resume-cache/
+config.yaml.local
