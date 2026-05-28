@@ -1,0 +1,190 @@
+# ============================================================
+# lark-dependencies.yaml
+# 本 skill 所有飞书资源的依赖声明
+#
+# ⚠️  Agent 变更规则（必须遵守）：
+#   任何涉及下列资源的变更请求，agent 必须：
+#   1. 对照 impact_on 列出受影响的脚本/步骤
+#   2. 区分风险等级后告知 VM
+#   3. VM confirm 后再执行
+#   4. 执行后展示变更结果，等待 VM 验收
+#
+# 风险等级定义：
+#   HIGH   - 字段被删除 / field_id 变更 / 表被删除或迁移
+#            → 直接导致脚本报错，必须同步更新 field_mapping.py
+#   MEDIUM - 字段改名（field_id 不变）/ 选项值改名
+#            → 脚本不受影响，但注释/文档需要同步更新
+#   LOW    - 新增字段 / 新增选项 / 调整字段顺序
+#            → 脚本不受影响，可选择性更新文档
+# ============================================================
+
+schema_version: "1.0"
+skill: loc-resume-screening
+maintained_by: 槐序 Agent
+last_updated: "2026-05-28"
+
+# ── 飞书资源清单 ────────────────────────────────────────────
+
+resources:
+
+  # ── 1. 合同信息收集表（VM 发给资源商填写） ──────────────────
+  - id: form_contract_collect
+    desc: 合同信息收集表（资源商填写银行/证件信息）
+    url: https://g4wt0dn9mss.sg.larksuite.com/share/base/form/shrlgF4lJe3AZUz7PY5XuQ8Ugfd
+    base_token: JbkRbkGf6aAqfnsCDHHlJMjbg3b
+    table_id: tblePA7PmmYlS936
+    used_by:
+      - scripts/generate_contract.py   # 读取字段值 → 填入合同变量
+      - scripts/field_mapping.py       # 字段 ID → 合同变量名的映射表
+    critical_fields:
+      - field_id: fld2JEyq9H
+        field_name: "姓名（全名）| Your full name"
+        mapped_to: "{{乙方姓名}}"
+        risk_if_deleted: HIGH
+      - field_id: fld3hdHuVd
+        field_name: "身份证或护照号 | Your identification number"
+        mapped_to: "{{乙方证件号}}"
+        note: "护照/身份证统一字段，改名无影响，删除或拆分有影响"
+        risk_if_deleted: HIGH
+      - field_id: fld8P0lZhg
+        field_name: "个人住址 | Your residential address"
+        mapped_to: "{{乙方地址}}"
+        risk_if_deleted: HIGH
+      - field_id: fldYELKkKa
+        field_name: "常用工作邮箱 | Your work email address"
+        mapped_to: "{{乙方邮箱}}"
+        risk_if_deleted: HIGH
+      - field_id: fldu4lmuce
+        field_name: "联系电话 | Your phone number"
+        mapped_to: "{{乙方手机号}}"
+        risk_if_deleted: HIGH
+      - field_id: fld4ENGLJM
+        field_name: "SWIFT"
+        mapped_to: "{{收款银行SWIFT}}"
+        note: "个人账户和公司账户共用同一字段"
+        risk_if_deleted: HIGH
+      - field_id: fldvZMzuk3
+        field_name: "个人账户 - 账户名 | Personal account - Bank account name"
+        mapped_to: "{{收款账户户名}}（个人账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fld7CGT1GH
+        field_name: "个人账户 - 账号 | Personal account - Account number / IBAN"
+        mapped_to: "{{收款银行账号}}（个人账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fldyPyrLdp
+        field_name: "个人账户 - 银行名 | Personal account - Bank name"
+        mapped_to: "{{收款银行名称}}（个人账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fldDLk0Jh9
+        field_name: "个人账户 - 支行地址 | Personal account - Bank (branch) address"
+        mapped_to: "{{收款银行地址}}（个人账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fldfQSK0Lb
+        field_name: "公司账户 - 账户名 | Business account - Bank account name"
+        mapped_to: "{{收款账户户名}}（公司账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fldIi83yp3
+        field_name: "公司账户 - 账号 | Business account - Account number"
+        mapped_to: "{{收款银行账号}}（公司账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fldq0pIMo3
+        field_name: "公司账户 - 银行名 | Business account - Bank name"
+        mapped_to: "{{收款银行名称}}（公司账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fld6xRZDjM
+        field_name: "公司账户 - 支行地址 | Business account - Bank branch address"
+        mapped_to: "{{收款银行地址}}（公司账户路径）"
+        risk_if_deleted: HIGH
+      - field_id: fldSZE1Shy
+        field_name: "收款货币 | What currency do you prefer to receive payments in?"
+        mapped_to: "{{币种}}"
+        note: "选项值：美元 USD / 其他 Other；改选项名有影响"
+        risk_if_deleted: HIGH
+      - field_id: fld043Vzeo
+        field_name: "收款账号类型 | What type of bank account do you use?"
+        mapped_to: "路由判断（个人账户/公司账户走不同字段组）"
+        note: "选项值：个人账户 Personal account / 公司账户 Business account；改选项名有影响"
+        risk_if_deleted: HIGH
+      - field_id: fldia8GcRh
+        field_name: "请上传您的个人身份证正反两面或者护照电子扫描件（请上传图像文件）"
+        mapped_to: "乙方证件扫描件（插入合同末尾附件页）"
+        note: "附件字段，支持多张图；公司合同跳过插图；anchor_keywords 见 field_mapping.py"
+        risk_if_deleted: HIGH
+
+  # ── 2. 合同模板表（内部维护，存模板文件和所需变量） ──────────
+  - id: contract_template_table
+    desc: 合同模板汇总表（存 AI 标注版合同 + 所需变量 + 变量映射说明）
+    url: https://g4wt0dn9mss.sg.larksuite.com/wiki/TwThwRU8uiLS7vkD1xHldANGgAh?table=tblAGv4MYDGtiZ5Z&view=vewCHHYjNn
+    base_token: WtNAb5ylMa0zqpsjciclnorugWb
+    table_id: tblAGv4MYDGtiZ5Z
+    used_by:
+      - scripts/generate_contract.py   # 读取模板文件（AI合同模版附件字段）
+    critical_fields:
+      - field_id: fldSeCxvVQ
+        field_name: "AI合同模版"
+        note: "附件字段，存 GPT 变量标注版 docx；generate_contract.py 从此下载模板"
+        risk_if_deleted: HIGH
+      - field_id: fldppDlNai
+        field_name: "合同名1"
+        note: "公式字段，从附件名提取合同名；用于匹配候选人适用合同"
+        risk_if_deleted: HIGH
+      - field_id: fldPx6ZMh8
+        field_name: "所需变量"
+        note: "人读字段，列出该合同所需变量；不被脚本直接读取，可安全修改"
+        risk_if_deleted: LOW
+      - field_id: fldwlvJEfh
+        field_name: "变量映射"
+        note: "人读字段，含 JSON 格式的映射说明；供 VM/Agent 理解映射关系，不被脚本直接读取"
+        risk_if_deleted: LOW
+
+  # ── 3. 简历收集表（资源商提交简历） ────────────────────────
+  - id: resume_table
+    desc: 简历收集表（资源商提交简历 + 评分结果存储）
+    base_token: JbkRbkGf6aAqfnsCDHHlJMjbg3b
+    table_id: tbll1fWOund3PSgd
+    used_by:
+      - scripts/parse_resumes.py
+      - scripts/rescore_and_write.py
+      - scripts/evaluate_resumes.py
+    note: "字段众多，关键字段见 references/config.md"
+
+  # ── 4. 资源管理主表（入库后的资源商档案） ───────────────────
+  - id: resource_master_table
+    desc: 外部资源信息表（已入库资源商档案）
+    base_token: HekabpDDkaUzyCsjKpqlCEFJgQf
+    note: "table_id 见 config.yaml；入库操作写入此表"
+
+# ── 本地文件依赖 ────────────────────────────────────────────
+
+local_files:
+  - path: scripts/field_mapping.py
+    desc: "合同变量名 → 收集表 field_id 的映射字典（source of truth）"
+    note: "收集表字段变更时，此文件需要同步更新"
+  - path: config.yaml
+    desc: "所有环境配置入口（base_token / smtp / 路径等）"
+  - path: config/resume_screening_rules_v2.json
+    desc: "评分规则配置"
+  - path: contracts/templates/
+    desc: "合同模板本地副本（与飞书 AI合同模版 字段保持同步）"
+
+# ── Agent 变更处理 SOP ──────────────────────────────────────
+#
+# VM 说「我要改 XXX 表的 XXX 字段」时，agent 必须执行：
+#
+# Step 1: 在本文件中搜索该资源的 field_id 或 field_name
+# Step 2: 检查 used_by 和 risk_if_deleted
+# Step 3: 按风险等级生成变更影响报告，格式如下：
+#
+#   ⚠️  变更影响分析
+#   操作：[删除/改名/迁移] [资源名] 的 [字段名]
+#   风险等级：HIGH / MEDIUM / LOW
+#   受影响模块：
+#     · scripts/field_mapping.py（需同步更新 field_id）
+#     · scripts/generate_contract.py（依赖此字段取值）
+#   执行顺序：
+#     1. [飞书操作]
+#     2. [同步更新 field_mapping.py 对应行]
+#     3. [dry-run 验证]
+#   是否继续？请 VM 确认后执行。
+#
+# Step 4: VM confirm → 执行 → 展示变更结果 → 等待 VM 验收

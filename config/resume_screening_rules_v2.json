@@ -1,0 +1,220 @@
+{
+  "price_rules": {
+    "aipe": {
+      "zh-CN>en": {
+        "target": 0.03,
+        "max": 0.04
+      },
+      "zh-CN>ja": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "zh-CN>ko": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "zh-CN>de": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "zh-CN>fr": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "zh-CN>es": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "zh-CN>pt": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "zh-CN>ru": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "zh-CN>it": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>zh-CN": {
+        "target": 0.03,
+        "max": 0.04
+      },
+      "en>ja": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "en>ko": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "en>de": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>fr": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>es": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "en>pt": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "en>ru": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>it": {
+        "target": 0.05,
+        "max": 0.06
+      }
+    },
+    "translation": {
+      "zh-CN>en": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "zh-CN>ja": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "zh-CN>ko": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "zh-CN>de": {
+        "target": 0.06,
+        "max": 0.07
+      },
+      "zh-CN>fr": {
+        "target": 0.06,
+        "max": 0.07
+      },
+      "zh-CN>es": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "zh-CN>pt": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "zh-CN>ru": {
+        "target": 0.06,
+        "max": 0.07
+      },
+      "zh-CN>it": {
+        "target": 0.06,
+        "max": 0.07
+      },
+      "en>zh-CN": {
+        "target": 0.04,
+        "max": 0.05
+      },
+      "en>ja": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>ko": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>de": {
+        "target": 0.06,
+        "max": 0.07
+      },
+      "en>fr": {
+        "target": 0.06,
+        "max": 0.07
+      },
+      "en>es": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>pt": {
+        "target": 0.05,
+        "max": 0.06
+      },
+      "en>ru": {
+        "target": 0.06,
+        "max": 0.07
+      },
+      "en>it": {
+        "target": 0.06,
+        "max": 0.07
+      }
+    }
+  },
+  "job_requirements": {
+    "min_years": 3,
+    "preferred_years": 5,
+    "min_word_count": 500000,
+    "preferred_word_count": 1000000
+  },
+  "basic_validation": {
+    "min_price": 0.01,
+    "max_price": 0.20,
+    "target_price": 0.03,
+    "hard_limit": 0.10
+  },
+  "valid_resume_rules": {
+    "game_exp_keywords": [
+      "game",
+      "gaming",
+      "游戏",
+      "手游",
+      "端游",
+      "主机",
+      "console",
+      "mobile game"
+    ],
+    "translation_exp_keywords": [
+      "translation",
+      "localization",
+      "本地化",
+      "翻译",
+      "译员",
+      "translator",
+      "proofreading",
+      "校对",
+      "editing",
+      "审校"
+    ]
+  },
+  "business_types": {
+    "translation": {
+      "name": "翻译",
+      "unit": "字数",
+      "keywords": ["翻译", "translation", "translate"]
+    },
+    "pe": {
+      "name": "PE (Post-editing)",
+      "unit": "字数",
+      "keywords": ["pe", "post-editing", "译后编辑", "aipe", "ai pe"]
+    },
+    "proofreading": {
+      "name": "校对",
+      "unit": "字数",
+      "keywords": ["校对", "proofreading", "proofread"]
+    },
+    "lqa": {
+      "name": "LQA (Linguistic Testing)",
+      "unit": "小时",
+      "keywords": ["lqa", "linguistic testing", "语言测试", "跑测"]
+    },
+    "qa_assessment": {
+      "name": "质量评估",
+      "unit": "字数或小时",
+      "keywords": ["质量评估", "quality assessment", "qa assessment"]
+    },
+    "consulting": {
+      "name": "本地化咨询",
+      "unit": "小时",
+      "keywords": ["咨询", "consulting", "consultant", "顾问"]
+    }
+  }
+}

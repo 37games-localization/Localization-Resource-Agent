@@ -1,0 +1,42 @@
+# ============================================================
+# loc-resume-screening 配置文件
+# VM 只需要填写这一个文件，所有脚本从这里读取配置
+# ============================================================
+
+# ── SMTP 邮件配置 ─────────────────────────────────────────
+smtp:
+  host: "smtp.exmail.qq.com"    # 企业邮箱 SMTP 地址（37内部邮箱用 smtp.example.com）
+  port: 465                      # SSL 端口
+  user: "vm@company.com"         # 发件人邮箱
+  password: ""                   # 邮箱密码或授权码
+  sender_name: "Localization Team"
+
+# ── 飞书配置 ──────────────────────────────────────────────
+lark:
+  # 简历收集表（评分数据主表）
+  base_token: ""                 # 飞书 Base token（简历收集表所在）
+  resume_table_id: ""            # 简历收集表 table-id
+
+  # 合同信息收集表（资源商填写银行/证件信息）
+  contract_base_token: ""        # 合同信息收集表所在 base token（与简历表同 base 时填相同值）
+  contract_table_id: ""          # 合同信息收集表 table-id
+
+  # 合同模板表（AI标注版模板，脚本自动从飞书下载，无需本地维护模板文件）
+  template_base_token: ""        # 合同模板表所在 base token
+  template_table_id: ""          # 合同模板汇总表 table-id
+
+# ── 路径配置 ──────────────────────────────────────────────
+paths:
+  contract_output: "~/Documents/loc-contracts/output/"   # 合同生成输出目录
+
+# ── LLM 配置 ─────────────────────────────────────────────
+llm:
+  base_url: "https://ai-proxy.37wan.com/anthropic"
+  api_key: ""                    # 留空则自动从 openclaw.json 读取
+  model: "claude-sonnet-4-5-20250929"
+
+# ── 测试模式 ─────────────────────────────────────────────
+# 上线前保持 enabled: true，所有邮件发到 test_email，不触达真实资源商
+test_mode:
+  enabled: true
+  test_email: ""                 # 引导阶段填自己的邮箱

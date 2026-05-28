@@ -1,0 +1,58 @@
+{
+  "_meta": {
+    "version": "v2.1",
+    "updated": "2026-05-24",
+    "source": "local_config",
+    "comment": "未来可替换为 API 拉取市场均价。三级优先级：external_api > internal_platform > this_file"
+  },
+  "_api_config": {
+    "enabled": false,
+    "endpoint": null,
+    "fallback_to_local": true,
+    "comment": "将 enabled 设为 true 并填写 endpoint 即可切换到 API 模式"
+  },
+  "aipe": {
+    "zh-CN>en":    {"expected": 0.03,  "cap": 0.04},
+    "zh-CN>ja":    {"expected": 0.02,  "cap": 0.05},
+    "zh-CN>ko":    {"expected": 0.02,  "cap": 0.05},
+    "zh-CN>vi":    {"expected": 0.02,  "cap": 0.03},
+    "zh-CN>th":    {"expected": 0.02,  "cap": 0.03},
+    "zh-CN>id":    {"expected": 0.025, "cap": 0.035},
+    "zh-CN>ms":    {"expected": 0.025, "cap": 0.03},
+    "zh-CN>ar":    {"expected": 0.025, "cap": 0.03},
+    "en>id":       {"expected": 0.025, "cap": 0.035},
+    "en>ru":       {"expected": 0.02,  "cap": 0.04},
+    "en>de":       {"expected": 0.03,  "cap": 0.05},
+    "en>fr":       {"expected": 0.03,  "cap": 0.05},
+    "en>it":       {"expected": 0.02,  "cap": 0.05},
+    "en>es-LA":    {"expected": 0.025, "cap": 0.035},
+    "en>pt-BR":    {"expected": 0.025, "cap": 0.035},
+    "en>pl":       {"expected": 0.03,  "cap": 0.05},
+    "en>nl":       {"expected": 0.03,  "cap": 0.05},
+    "en>tr":       {"expected": 0.02,  "cap": 0.05},
+    "en>ms":       {"expected": 0.025, "cap": 0.03},
+    "en>ar":       {"expected": 0.025, "cap": 0.03}
+  },
+  "translation": {
+    "zh-CN>en":    {"expected": 0.04,  "cap": 0.06},
+    "zh-CN>ja":    {"expected": 0.035, "cap": 0.06},
+    "zh-CN>ko":    {"expected": 0.03,  "cap": 0.05},
+    "zh-CN>vi":    {"expected": 0.025, "cap": 0.035},
+    "zh-CN>th":    {"expected": 0.025, "cap": 0.035},
+    "zh-CN>id":    {"expected": 0.03,  "cap": 0.04},
+    "zh-CN>ms":    {"expected": 0.03,  "cap": 0.04},
+    "zh-CN>ar":    {"expected": 0.03,  "cap": 0.04},
+    "en>id":       {"expected": 0.03,  "cap": 0.04},
+    "en>ru":       {"expected": 0.035, "cap": 0.05},
+    "en>de":       {"expected": 0.05,  "cap": 0.07},
+    "en>fr":       {"expected": 0.05,  "cap": 0.07},
+    "en>it":       {"expected": 0.04,  "cap": 0.05},
+    "en>es-LA":    {"expected": 0.03,  "cap": 0.04},
+    "en>pt-BR":    {"expected": 0.03,  "cap": 0.04},
+    "en>pl":       {"expected": 0.04,  "cap": 0.06},
+    "en>nl":       {"expected": 0.04,  "cap": 0.06},
+    "en>tr":       {"expected": 0.04,  "cap": 0.05},
+    "en>ms":       {"expected": 0.03,  "cap": 0.04},
+    "en>ar":       {"expected": 0.03,  "cap": 0.04}
+  }
+}
