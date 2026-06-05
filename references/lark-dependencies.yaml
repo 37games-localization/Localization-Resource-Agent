@@ -169,6 +169,13 @@ resources:
         used_by:
           - scripts/export_badcase_snapshots.py
         risk_if_deleted: MEDIUM
+      - field_id: fldkpbZ4g5
+        field_name: "Badcase快照"
+        type: attachment
+        note: "VM agent 上传脱敏 snapshot JSON；项目负责人用 push_badcase_issues.py 读取并开 GitHub issue"
+        used_by:
+          - scripts/export_badcase_snapshots.py
+        risk_if_deleted: MEDIUM
 
 # ── 本地文件依赖 ────────────────────────────────────────────
 
