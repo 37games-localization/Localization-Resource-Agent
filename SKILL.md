@@ -35,6 +35,7 @@ python3 scripts/check_config.py
 | `check_signed_contract.py` | 核查签字合同 → 更新飞书状态 | 「XXX的合同已签字」 |
 | `send_rejection_email.py` | 发婉拒邮件（二次确认）→ 更新飞书 | 「婉拒XXX」 |
 | `update_status.py` | 手动推进招募状态 | 「把XXX状态改成XXX」 |
+| `export_badcase_snapshots.py` | 导出 badcase 脱敏快照 → git push → GitHub issue | 「导出badcase」「推送badcase」 |
 
 所有脚本从 skill 根目录下的 `config.yaml` 读取配置。
 
@@ -66,6 +67,27 @@ python3 scripts/rescore_and_write.py --name "青木遥"
 # 先预览再执行（所有脚本都支持 --dry-run）
 python3 scripts/generate_contract.py --name "宋赛楠" --dry-run
 python3 scripts/generate_contract.py --name "宋赛楠" --send
+```
+
+## Badcase 回流
+
+使用过程中遇到 agent 判断不对，直接说：
+
+```
+把这个标成 badcase，应该进人工复核，不该直接婉拒
+把 XXX 标成 badcase，合同应该用个人版模板
+把刚才那封邮件标成 badcase，语气太硬
+```
+
+或者直接在飞书主表「是否Badcase」列选「⚠️ 是」，可选填「期望结果」一句话说明。
+
+VM 只需要做这两件事，其余上下文收集、推送 GitHub issue 由系统自动处理。
+
+手动触发导出：
+
+```bash
+python3 scripts/export_badcase_snapshots.py --dry-run  # 预览
+python3 scripts/export_badcase_snapshots.py            # 正式导出并推送
 ```
 
 ## 手动纠正评分
@@ -225,6 +247,12 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
 ---
 
 ## 📋 版本更新记录
+
+### v2.3（2026-06-05）
+- ✨ 新增 badcase 回流能力：飞书主表加「是否Badcase」+「期望结果」两个字段
+- ✨ 新增 `export_badcase_snapshots.py`：脱敏快照导出 + git push + GitHub issue 自动创建
+- ✨ `config.yaml` 新增 `badcase_export` 和 `github` 配置块
+- 📝 onboarding 增加 badcase 使用说明
 
 ### v2.2（2026-05-28）
 - ✨ 新增草稿模式（`--draft`）：三个发邮件脚本均支持，生成 `.eml` 文件保存到本地，VM 双击用邮件客户端打开后自行点发送

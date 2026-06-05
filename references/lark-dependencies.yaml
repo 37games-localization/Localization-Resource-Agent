@@ -152,7 +152,23 @@ resources:
   - id: resource_master_table
     desc: 外部资源信息表（已入库资源商档案）
     base_token: HekabpDDkaUzyCsjKpqlCEFJgQf
-    note: "table_id 见 config.yaml；入库操作写入此表"
+    table_id: tblkYSN55qkj9Td4
+    note: "入库操作写入此表；亦用于 badcase 收集"
+    badcase_fields:
+      - field_id: fldxTGrPF3
+        field_name: "是否Badcase"
+        type: select
+        options: ["⚠️ 是", "✅ 已处理"]
+        used_by:
+          - scripts/export_badcase_snapshots.py
+        risk_if_deleted: MEDIUM
+      - field_id: fldqs6UgTv
+        field_name: "期望结果"
+        type: text
+        note: "VM 填写一句话期望，非必填"
+        used_by:
+          - scripts/export_badcase_snapshots.py
+        risk_if_deleted: MEDIUM
 
 # ── 本地文件依赖 ────────────────────────────────────────────
 

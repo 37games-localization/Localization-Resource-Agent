@@ -40,3 +40,16 @@ llm:
 test_mode:
   enabled: true
   test_email: ""                 # 引导阶段填自己的邮箱
+
+# ── Badcase 收集与导出 ───────────────────────────────────
+# 当 VM 在飞书主表标记「是否Badcase=⚠️ 是」后，脚本会自动收集并推送 GitHub issue
+badcase_export:
+  enabled: false                 # 改为 true 后脚本才会实际导出
+  export_dir: "~/Documents/loc-agent-badcase-exports/"  # 本地脱敏导出目录
+  auto_mark_exported: false      # 导出后是否自动把飞书状态改为「✅ 已处理」
+  local_salt: ""                 # 首次运行自动生成，请勿手动清空
+
+# ── GitHub 配置（Badcase issue 推送） ───────────────────
+github:
+  repo: "<org-or-user>/<repo>"  # 目标仓库
+  token: ""                              # 留空则自动从 git remote URL 读取
