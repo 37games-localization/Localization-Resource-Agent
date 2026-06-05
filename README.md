@@ -1,6 +1,6 @@
 # 本地化资源管理 Agent
 
-> Localization Resource Agent · 当前版本：v2.2
+> Localization Resource Agent · 当前版本：v2.3
 
 覆盖外部译者从**投简历到正式入库**的完整招募链路，通过自然语言指令驱动，飞书多维表格作为数据中枢。
 
@@ -18,6 +18,7 @@
 | 发婉拒邮件 | 「给 XXX 发婉拒」 |
 | 状态推进 | 「XXX 财务审批通过了，更新状态」 |
 | 查看候选人列表 | 「列出所有初筛通过的候选人」 |
+| **标记 Badcase** | 「把这个标成 badcase，应该进人工复核」或直接在飞书打标 |
 
 ---
 
@@ -63,6 +64,17 @@ lark-cli config bind --source openclaw --identity bot-only
 ---
 
 ## 更新日志
+
+### v2.3（2026-06-05）
+**Badcase 回流上线**
+
+- ✨ 飞书资源候选人主表新增「是否Badcase」+「期望结果」两个字段
+  - VM 遇到问题：在飞书对应行标记「⚠️ 是」，可选填一句期望结果
+  - 或直接告诉 Agent：「把这个标成 badcase，应该进人工复核」
+- ✨ 新增 `export_badcase_snapshots.py`：自动导出脱敏快照 → git push → GitHub 开 issue
+  - 脱敏处理：真实姓名/邮箱/电话/证件/银行信息全部移除，只保留匿名 ID、状态、评分摘要和 VM 期望结果
+  - 在 `config.yaml` 设置 `badcase_export.enabled: true` 后生效
+- 📝 onboarding.md 新增 Badcase 使用说明
 
 ### v2.2（2026-05-28）
 **草稿模式上线 + 旧品牌信息清理**
@@ -125,6 +137,7 @@ loc-resume-screening/
 │   ├── evaluate_resumes.py     # 简历评分
 │   ├── rescore_and_write.py    # 重算评分并写回飞书
 │   ├── update_status.py        # 状态推进
+│   ├── export_badcase_snapshots.py  # Badcase 导出 + GitHub issue
 │   ├── check_config.py         # 配置验证
 │   └── field_mapping.py        # 变量↔飞书字段 ID 映射
 └── references/
