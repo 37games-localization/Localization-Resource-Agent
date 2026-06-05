@@ -104,11 +104,12 @@ lark-cli config bind --source openclaw --identity bot-only
 ### v2.3（2026-06-05）
 **Badcase 回流上线**
 
-- ✨ 飞书资源候选人主表新增「是否Badcase」+「期望结果」两个字段
+- ✨ 飞书资源候选人主表新增「是否Badcase」+「期望结果」+「Badcase快照」三个字段
   - VM 遇到问题：在飞书对应行标记「⚠️ 是」，可选填一句期望结果
   - 或直接告诉 Agent：「把这个标成 badcase，应该进人工复核」
-- ✨ 新增 `export_badcase_snapshots.py`：自动导出脱敏快照 → git push → GitHub 开 issue
+- ✨ 新增 `export_badcase_snapshots.py`：自动生成脱敏快照 JSON 并上传到飞书「Badcase快照」附件字段
   - 脱敏处理：真实姓名/邮箱/电话/证件/银行信息全部移除，只保留匿名 ID、状态、评分摘要和 VM 期望结果
+  - **VM 不需要任何 GitHub 权限**，快照存在飞书表，由项目负责人集中拉取并开 GitHub issue
   - 在 `config.yaml` 设置 `badcase_export.enabled: true` 后生效
 - 📝 onboarding.md 新增 Badcase 使用说明
 
