@@ -242,11 +242,12 @@ git log --oneline
 ### 🔴 P0 — dialog-driver 完成后立即做
 
 - [ ] **checkpoint 持久化写飞书**（2026-06-10 确认方案）
-  - 脚本跑到 dialog checkpoint 时，把 token 写入候选人记录的「自由状态补充」字段
-  - resume 完成后清空该字段
-  - 触发语：「有哪些候选人在等我决策」→ 查飞书「自由状态补充」非空的记录列出来
-  - 触发语：「继续处理XXX」→ 读飞书拿 token，直接 resume，无需用户记 token
-  - **设计原则**：零新增字段，复用现有「招募状态」+「自由状态补充」，跨天/跨 session 安全恢复
+  - 脚本跑到 dialog checkpoint 时，把 token 写入**流程日志表**一行（status=waiting, token=xxx）
+  - resume 完成后更新该行 status=decided
+  - VM 触发时说「继续李全鸿 record_id=recXXX」→ 我先查流程日志有无 status=waiting 行，有则直接 resume
+  - 触发语：「有哪些候选人在等我决策」→ 查流程日志表 status=waiting 的行列出来
+  - **设计原则**：复用已有流程日志表（tblVQvjpJw9CO0kU），零新增字段，与原始 Agent 设计完全对齐
+  - **原始设计基础**：流程日志表本就记录每步输入输出，VM 触发时提供 record_id，状态从飞书读不靠上下文
 
 - [ ] **SKILL.md 补充「继续XXX」「有哪些在等我」触发语**
 
