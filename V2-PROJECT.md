@@ -2,7 +2,7 @@
 
 > 文档维护：槐序
 > 创建：2026-06-10
-> 最后更新：2026-06-10 10:23
+> 最后更新：2026-06-10 11:14
 > 分支：`v2-workflow-viz`（稳定版保底：`main`）
 
 ---
@@ -193,8 +193,9 @@ assert result["base_tier"] == snapshot["base_tier"]
 | Bug Fix | `send_test_email_v2` build_email 重名 | ✅ | `f2b3dcf` | 2026-06-10 |
 | Phase 3 | `workflow_runner.py` 统一入口 | ✅ | `30a0744` | 2026-06-10 |
 | Phase 3 | `SKILL.md` v2.3 更新 | ✅ | `30a0744` | 2026-06-10 |
-| TestGen | 生成规则单元测试集（25+用例）| 🔄 进行中 | — | 2026-06-10 |
-| TestRun | 执行测试 + 生成报告 | ⏳ 等 TestGen | — | — |
+| 测试体系 | 规则单元测试集 v1.0（25用例全过）| ✅ | `fe5d538` | 2026-06-10 |
+| 稳定性 | WorkflowEngine 熔断机制（连续失败≥5次强退）| ✅ | `6b491a7` | 2026-06-10 |
+| **Demo** | **全流程实跑验证（rescore 可视化完整跑通）** | ✅ | — | 2026-06-10 |
 | Layer 2 | Agent 行为评测框架设计 | 📅 待规划 | — | — |
 
 ### 已记录问题（issues/）
@@ -205,6 +206,8 @@ assert result["base_tier"] == snapshot["base_tier"]
 | lark-cli 版本过旧 → 404 | 1.0.48 API 路径失效，需 ≥1.0.50 | ✅ check_config 新增版本检查 |
 | pymupdf 在 conda 环境未安装 | pip3 装到系统 Python，conda 隔离 | ✅ check_config 新增软依赖警告 |
 | build_email 重名 bug | 原版 send_test_email.py 有两个同名函数 | ✅ v2 自实现，绕过原版 |
+| 子 agent 空参数死循环 | TestGen 子 agent exec 发出空命令循环 45min | ✅ WorkflowEngine 熔断机制（≥5次强退）|
+| 测试集预期与引擎实际出入 | 完全符合门槛：字数≥500k AND 次要≥10，普通描述难达到 | ✅ C07 边界测试用例明确覆盖 |
 
 ---
 
