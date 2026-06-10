@@ -132,11 +132,14 @@ class WorkflowEngine:
         run_id: str = None,
         silent: bool = False,
         write_lark: bool = True,
+        max_failures: int = 5,
     ):
         self.candidate_name = candidate_name
         self.run_id         = run_id or f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:6]}"
         self.silent         = silent        # True = 不打印终端输出
         self.write_lark     = write_lark    # True = 写飞书日志表
+        self.max_failures   = max_failures  # 连续失败上限，超过则强制终止
+        self._failure_count = 0             # 当前连续失败次数
         self.steps: list[WorkflowStep] = []
         self._pending_checkpoint: Optional[WorkflowStep] = None
 
@@ -453,7 +456,7 @@ class WorkflowEngine:
                 return "跳过"
 
     def error(self, step_name: str, error_msg: str, input_summary: str = ""):
-        """记录一个错误节点"""
+        """记录一个错误节点，并检查熔断条件（连续失败超过 max_failures 则强制退出）"""
         step = WorkflowStep(
             run_id=self.run_id,
             step_name=step_name,
@@ -465,7 +468,30 @@ class WorkflowEngine:
         self.steps.append(step)
         self._print_step(step)
         self._write_log_to_lark(step)
+
+        # 熔断：连续失败计数
+        self._failure_count += 1
+        if self._failure_count >= self.max_failures:
+            msg = (
+                f"\n{'='*60}\n"
+                f"  🛑 熔断触发：连续失败 {self._failure_count} 次，已达上限 {self.max_failures}\n"
+                f"  Run ID: {self.run_id}\n"
+                f"  最后失败步骤：{step_name}\n"
+                f"  错误信息：{error_msg}\n"
+                f"{'='*60}"
+            )
+            if not self.silent:
+                print(msg)
+            raise RuntimeError(
+                f"WorkflowEngine 熔断：连续失败 {self._failure_count} 次（上限 {self.max_failures}）"
+                f"，最后失败步骤：{step_name}，原因：{error_msg}"
+            )
+
         return step
+
+    def reset_failure_count(self):
+        """手动重置失败计数（步骤成功后调用，或人工干预后恢复）"""
+        self._failure_count = 0
 
     def summary(self) -> dict:
         """返回本次工作流的执行摘要"""
@@ -547,6 +573,10 @@ class StepContext:
             elapsed = self._step.elapsed()
             s_icon  = STATUS_ICONS.get(self._step.status, "")
             print(f"    → 输出：{self._step.output_summary}  {s_icon} [{elapsed}]")
+
+        # 成功步骤重置失败计数（偶发错误不被误判为死循环）
+        if self._step.status == StepStatus.DONE:
+            self.engine._failure_count = 0
 
         self.engine._write_log_to_lark(self._step)
         return False  # 不吞异常
