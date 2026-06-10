@@ -1,8 +1,8 @@
 ---
 name: loc-resume-screening
-version: "2.2"
-updated: "2026-05-28"
-description: "本地化资源管理全流程 skill，覆盖译者简历筛选到入库的完整链路。触发场景：(1) VM 首次安装配置引导；(2) 新简历入库解析评分；(3) 发测试题邮件；(4) 生成并发送合同；(5) 合同签署核查；(6) 招募状态推进；(7) 手动纠正评分；(8) 全量重算。所有操作以飞书表为单一数据源，脚本确定性执行，不依赖 AI 上下文记忆状态。"
+version: "2.3"
+updated: "2026-06-10"
+description: "本地化资源管理全流程 skill，覆盖译者简历筛选到入库的完整链路。v2 工作流可视化版：每步行动实时展示，Human Decision 节点支持对话驱动暂停-恢复。触发场景：(1) VM 首次安装配置引导；(2) 新简历入库解析评分；(3) 发测试题邮件；(4) 生成并发送合同；(5) 合同签署核查；(6) 招募状态推进；(7) 手动纠正评分；(8) 全量重算。所有操作以飞书表为单一数据源，脚本确定性执行，不依赖 AI 上下文记忆状态。"
 ---
 
 # 本地化资源管理全流程
@@ -28,6 +28,7 @@ python3 scripts/check_config.py
 
 | 脚本 | 功能 | 触发语 |
 |------|------|--------|
+| `workflow_runner.py` | **v2 统一入口**：按招募状态自动调度各 v2 脚本 | 「下一步」「处理XXX」「列出候选人」 |
 | `parse_resumes.py` | LLM 解析简历 PDF → 写飞书结构化字段 | 「解析简历」「新简历入库」 |
 | `rescore_and_write.py` | 确定性重算评分 → 写回飞书 | 「重跑评分」「重算评分」 |
 | `send_test_email.py` | 发测试题邮件 → 更新飞书状态 | 「发测试题给XXX」 |
@@ -68,6 +69,71 @@ python3 scripts/rescore_and_write.py --name "青木遥"
 python3 scripts/generate_contract.py --name "宋赛楠" --dry-run
 python3 scripts/generate_contract.py --name "宋赛楠" --send
 ```
+
+## v2 工作流可视化版
+
+### v2 脚本说明
+
+所有 `*_v2.py` 脚本都接入了 `workflow_engine.py`，提供：
+- **行动可视化**：每一步的输入/输出实时打印到终端，操作有据可查
+- **Human Decision 节点**：关键步骤可以暂停，等待人类确认后再继续
+- **飞书流程日志**：每步执行记录写入飞书流程日志表（可关闭）
+
+| 脚本 | 功能 |
+|------|------|
+| `rescore_and_write_v2.py` | 评分写回 + 可视化，支持 `--interactive` 交互确认 |
+| `send_test_email_v2.py` | 发测试题 + 可视化，发送前有 dialog 确认 |
+| `generate_contract_v2.py` | 生成合同 + 可视化，生成后有 dialog 确认 |
+| `workflow_runner.py` | **统一入口**，按招募状态路由到对应 v2 脚本 |
+
+### workflow_runner.py 用法
+
+```bash
+# 查看候选人状态
+python3 scripts/workflow_runner.py status --name "青木遥"
+
+# 自动判断下一步并执行
+python3 scripts/workflow_runner.py next --name "青木遥"
+python3 scripts/workflow_runner.py next --name "青木遥" --file ~/Downloads/test.pdf
+
+# 手动指定某一步
+python3 scripts/workflow_runner.py score --name "青木遥"
+python3 scripts/workflow_runner.py test-email --name "青木遥" --file ~/test.pdf
+python3 scripts/workflow_runner.py contract --name "青木遥"
+
+# 恢复 dialog checkpoint
+python3 scripts/workflow_runner.py resume --token ckpt-xxx --decision "写入"
+
+# 列出所有候选人 + 状态
+python3 scripts/workflow_runner.py list
+```
+
+### next 自动路由规则
+
+| 当前招募状态 | 自动调用 |
+|------------|----------|
+| 📋 简历待筛选 / 🔍 初筛中 / ✅ 初筛通过 | `rescore_and_write_v2.py --interactive` |
+| 📝 测试题待发 | `send_test_email_v2.py --file <pdf>`（需 `--file`）|
+| ✅ 测试通过 / 📄 合同待生成 | `generate_contract_v2.py` |
+| 其他状态 | 打印当前状态 + 人工操作说明 |
+
+### dialog 模式工作原理
+
+1. Agent 调用 `workflow_runner.py next`，v2 脚本在关键决策节点触发 `checkpoint(mode="dialog")`
+2. 脚本打印 checkpoint 信息（含 `token=ckpt-xxx`）后**退出等待，不阻塞终端**
+3. 用户/对话 Agent 查看信息后，回复决策（如「写入」「跳过」）
+4. 对话 Agent 调用 `workflow_runner.py resume --token ckpt-xxx --decision "写入"` 恢复执行
+5. checkpoint 文件存储在 `~/.loc-resume-checkpoints/` 目录
+
+### 回滚方法
+
+如需切回无可视化的原版脚本：
+
+```bash
+git checkout main
+```
+
+---
 
 ## Badcase 回流
 
@@ -247,6 +313,12 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
 ---
 
 ## 📋 版本更新记录
+
+### v2.3（2026-06-10）
+- ✨ 新增 `workflow_runner.py`：v2 工作流统一入口，支持 `status` / `next` / `score` / `test-email` / `contract` / `resume` / `list` 7 个子命令
+- ✨ `next` 子命令根据飞书招募状态自动路由到对应 v2 脚本，进程隔离调用（subprocess）
+- ✨ `resume` 子命令支持 dialog checkpoint 恢复，对话 Agent 可将用户决策写回工作流
+- 📝 SKILL.md 补充『v2 工作流可视化版』说明段落
 
 ### v2.3（2026-06-05）
 - ✨ 新增 badcase 回流能力：飞书主表加「是否Badcase」+「期望结果」两个字段
