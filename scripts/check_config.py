@@ -16,6 +16,105 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_llm_api_key, validate_config, is_test_mode, get_test_email
 
+# ──────────────────────────────────────────────
+# 新增：基础依赖检查
+# ──────────────────────────────────────────────
+
+def check_pyyaml() -> tuple[bool, str]:
+    """硬依赖：检查 pyyaml 是否安装"""
+    try:
+        import yaml  # noqa: F401
+        return True, "pyyaml 已安装"
+    except ImportError:
+        return False, "pyyaml 未安装 → 运行：pip install pyyaml"
+
+
+def check_lark_cli_version(min_version: str = "1.0.50") -> tuple[bool, str]:
+    """硬依赖：检查 lark-cli 是否安装且版本 >= min_version"""
+    import shutil
+
+    if not shutil.which("lark-cli"):
+        return False, "lark-cli 未安装 → 请先安装 lark-cli"
+
+    try:
+        r = subprocess.run(
+            ["lark-cli", "--version"],
+            capture_output=True, text=True, timeout=10
+        )
+        raw = (r.stdout + r.stderr).strip()
+        # 解析版本号，支持 "lark-cli 1.0.50" / "1.0.50" 等格式
+        import re
+        m = re.search(r"(\d+\.\d+\.\d+)", raw)
+        if not m:
+            return False, f"无法解析 lark-cli 版本号：{raw[:80]}"
+        version_str = m.group(1)
+
+        def parse_ver(v):
+            return tuple(int(x) for x in v.split("."))
+
+        current = parse_ver(version_str)
+        minimum = parse_ver(min_version)
+
+        if current >= minimum:
+            return True, f"lark-cli {version_str}（满足最低版本要求 ≥{min_version}）"
+        else:
+            return False, (
+                f"lark-cli {version_str} 低于最低版本 {min_version} "
+                f"→ 请运行：lark-cli update"
+            )
+    except Exception as e:
+        return False, f"lark-cli 版本检查失败：{e}"
+
+
+def check_pymupdf() -> tuple[bool, str]:
+    """软依赖：检查 pymupdf 是否安装（失败只警告，不 exit）"""
+    try:
+        import fitz  # noqa: F401
+        return True, "pymupdf 已安装"
+    except ImportError:
+        return False, (
+            "pymupdf 未安装 → PDF 简历将无法解析，评分仅依赖飞书表字段，精度下降\n"
+            "     安装命令：pip install pymupdf"
+        )
+
+
+# ──────────────────────────────────────────────
+# 新增：飞书 token 非空检查（硬依赖）
+# ──────────────────────────────────────────────
+
+def check_lark_tokens(cfg: dict) -> list[tuple[str, bool, str]]:
+    """
+    硬依赖：检查飞书 base_token / resume_table_id 非空。
+    返回 [(field, ok, msg), ...]
+    """
+    lark = get_lark(cfg)
+    results = []
+
+    base_token = lark.get("base_token", "")
+    if base_token:
+        results.append(("base_token", True, "已填写"))
+    else:
+        results.append((
+            "base_token", False,
+            "未填写 → 请在 config.yaml 的 lark.base_token 填入飞书多维表格 base token"
+        ))
+
+    resume_table_id = lark.get("resume_table_id", "")
+    if resume_table_id:
+        results.append(("resume_table_id", True, "已填写"))
+    else:
+        results.append((
+            "resume_table_id", False,
+            "未填写 → 请在 config.yaml 的 lark.resume_table_id 填入简历表 table ID"
+        ))
+
+    return results
+
+
+# ──────────────────────────────────────────────
+# 已有检查（保留，不破坏）
+# ──────────────────────────────────────────────
+
 def check_smtp(cfg):
     smtp = get_smtp(cfg)
     host = smtp.get("host", "")
@@ -85,7 +184,6 @@ def check_gh_cli() -> tuple[bool, str]:
         return False, "未安装 gh CLI"
     r = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
     if r.returncode == 0:
-        # 提取登录账号
         for line in r.stdout.splitlines():
             if "Logged in" in line:
                 return True, line.strip()
@@ -101,7 +199,6 @@ def check_badcase_config(cfg: dict) -> list[tuple[str, bool, str]]:
     bc = cfg.get("badcase_export", {})
     gh = cfg.get("github", {})
 
-    # badcase_export.enabled
     enabled = bc.get("enabled", False)
     results.append((
         "badcase_export.enabled",
@@ -110,8 +207,6 @@ def check_badcase_config(cfg: dict) -> list[tuple[str, bool, str]]:
     ))
 
     if enabled:
-        # export_dir 可写
-        from pathlib import Path
         export_dir = Path(bc.get("export_dir", "~/Documents/loc-agent-badcase-exports/")).expanduser()
         try:
             export_dir.mkdir(parents=True, exist_ok=True)
@@ -119,14 +214,11 @@ def check_badcase_config(cfg: dict) -> list[tuple[str, bool, str]]:
         except Exception as e:
             results.append(("export_dir 可写", False, str(e)))
 
-        # gh CLI
         ok, msg = check_gh_cli()
         results.append(("gh CLI", ok, msg))
 
-        # github.token（备用）
         token = gh.get("token", "")
         if not ok:
-            # gh 不可用时，token 就是必填
             results.append((
                 "github.token",
                 bool(token),
@@ -135,43 +227,92 @@ def check_badcase_config(cfg: dict) -> list[tuple[str, bool, str]]:
 
     return results
 
-    print("=" * 55)
-    print("  loc-resume-screening 配置检查")
-    print("=" * 55)
+
+# ──────────────────────────────────────────────
+# main
+# ──────────────────────────────────────────────
+
+def main():
+    print("=" * 60)
+    print("  loc-resume-screening 环境自检 v2")
+    print("=" * 60)
+
+    # ── Section 1：基础依赖（硬+软） ──────────────────────────
+    print("\n🔧 基础依赖")
+
+    hard_dep_failed = False
+
+    # pyyaml（硬依赖）
+    ok, msg = check_pyyaml()
+    print(f"  {'✅' if ok else '❌'} {msg}")
+    if not ok:
+        print("     → 请运行：pip install pyyaml")
+        hard_dep_failed = True
+
+    # lark-cli 版本（硬依赖）
+    ok, msg = check_lark_cli_version("1.0.50")
+    print(f"  {'✅' if ok else '❌'} {msg}")
+    if not ok:
+        hard_dep_failed = True
+
+    # pymupdf（软依赖）
+    ok, msg = check_pymupdf()
+    if ok:
+        print(f"  ✅ {msg}")
+    else:
+        print(f"  ⚠️  {msg}")
+
+    if hard_dep_failed:
+        print("\n❌ 基础依赖检查未通过，请修复后重新运行。")
+        sys.exit(1)
+
+    # ── Section 2：配置完整性 ─────────────────────────────────
+    print("\n📋 配置完整性")
 
     cfg = load_config()
 
-    # 1. 配置完整性
-    print("\n📋 配置完整性检查")
+    # 2a. 飞书 token 非空（硬依赖）
+    token_results = check_lark_tokens(cfg)
+    token_failed = False
+    for field, ok, msg in token_results:
+        print(f"  {'✅' if ok else '❌'} {field}：{msg}")
+        if not ok:
+            token_failed = True
+
+    if token_failed:
+        print("\n❌ 飞书配置缺失，请填写后重新运行。")
+        sys.exit(1)
+
+    # 2b. 通用配置完整性
     issues = validate_config(cfg)
     if issues:
         for iss in issues:
             print(f"  ❌ {iss}")
         print("\n请先填写 config.yaml 后再运行此脚本。")
         sys.exit(1)
-    print("  ✅ config.yaml 字段完整")
+    print("  ✅ config.yaml 其余字段完整")
 
-    # 2. SMTP
+    # ── Section 3：SMTP 连通性 ────────────────────────────────
     print("\n📧 SMTP 连通性")
     ok, msg = check_smtp(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
 
-    # 3. 飞书
+    # ── Section 4：飞书 Base 访问 ─────────────────────────────
     print("\n🪁 飞书 Base 访问")
     ok, msg = check_lark(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
 
-    # 4. LLM
+    # ── Section 5：LLM API ────────────────────────────────────
     print("\n🤖 LLM API")
     ok, msg = check_llm(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
 
-    # 5. 合同模板
+    # ── Section 6：合同模板 ───────────────────────────────────
     print("\n📄 合同模板")
     ok, msg = check_templates(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
 
-    # 6. TEST_MODE 提示
+    # ── Section 7：TEST_MODE 提示 ─────────────────────────────
     print("\n⚙️  运行模式")
     if is_test_mode(cfg):
         te = get_test_email(cfg)
@@ -180,7 +321,7 @@ def check_badcase_config(cfg: dict) -> list[tuple[str, bool, str]]:
     else:
         print("  🟢 正式模式，邮件将发送至真实资源商")
 
-    # 7. Badcase 回流
+    # ── Section 8：Badcase 回流 ───────────────────────────────
     print("\n🚨 Badcase 回流配置")
     bc_results = check_badcase_config(cfg)
     bc_enabled = cfg.get("badcase_export", {}).get("enabled", False)
@@ -193,7 +334,7 @@ def check_badcase_config(cfg: dict) -> list[tuple[str, bool, str]]:
         print("        badcase_export:")
         print("          enabled: true")
         print()
-        print("     2. 确保機器上已安装 gh CLI 并登录：")
+        print("     2. 确保机器上已安装 gh CLI 并登录：")
         print("        安装： https://cli.github.com")
         print("        登录： gh auth login")
         print()
@@ -225,9 +366,10 @@ def check_badcase_config(cfg: dict) -> list[tuple[str, bool, str]]:
                     elif "export_dir" in item:
                         print(f"     • 检查导出目录路径权限：{msg}")
 
-    print("\n" + "=" * 55)
-    print("  配置检查完成，可以开始使用！")
-    print("=" * 55)
+    print("\n" + "=" * 60)
+    print("  ✅ 环境自检完成，可以开始使用！")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     main()
