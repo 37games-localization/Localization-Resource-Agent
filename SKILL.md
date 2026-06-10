@@ -303,6 +303,96 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
 
 ---
 
+---
+
+## 对话驱动模式（生产使用）
+
+当用户说以下任意触发语时，使用对话驱动模式，不要让用户手动执行命令行。
+
+> **核心脚本**：`scripts/run_dialog.py`
+> **执行目录**：`cd ~/.agents/skills/loc-resume-screening`
+
+### 触发语 → 操作映射
+
+| 用户说 | AI 做 |
+|--------|-------|
+| 「处理XXX」「帮我处理XXX」「下一步 XXX」 | 调用 `run_dialog.py score --name "XXX"`，根据招募状态自动路由 |
+| 「评分XXX」「重算XXX的分」 | 调用 `run_dialog.py score --name "XXX"` |
+| 「发测试题给XXX」 | 调用 `run_dialog.py test-email --name "XXX" --file <最近用过的附件>` |
+| 「给XXX生成合同」「发合同给XXX」 | 调用 `run_dialog.py contract --name "XXX"` |
+| 「列出候选人」「看看现在都到哪步了」 | 调用 `workflow_runner.py list` |
+| 「XXX的状态」「XXX到哪步了」 | 调用 `workflow_runner.py status --name "XXX"` |
+
+### AI 执行流程
+
+1. 解析用户意图，提取候选人姓名
+2. 调用 `python3 scripts/run_dialog.py <操作> --name "XXX"`
+3. 解析 JSON 输出：
+   - `status=checkpoint`：把 summary 格式化成自然语言告诉用户，问 options 里的选项
+   - `status=done`：把 message 告诉用户
+   - `status=error`：报告错误，建议用户检查配置
+4. 用户回复决策后：调用 `python3 scripts/run_dialog.py resume --token <token> --decision "<用户回复>"`
+5. 重复 3-4 直到 status=done
+
+### JSON 输出格式
+
+**checkpoint 状态（等待用户决策）：**
+```json
+{
+  "status": "checkpoint",
+  "checkpoint_token": "ckpt-xxx",
+  "node": "确认写入飞书",
+  "candidate": "李全鸿",
+  "summary": {
+    "total_score": "100/100",
+    "tier": "S",
+    "suggestion": "优先录用"
+  },
+  "options": ["写入", "跳过", "退出"],
+  "raw_output": "..."
+}
+```
+
+**done 状态（流程完成）：**
+```json
+{
+  "status": "done",
+  "candidate": "李全鸿",
+  "message": "决策「写入」已执行，后台任务完成",
+  "raw_output": "..."
+}
+```
+
+**error 状态（出错）：**
+```json
+{
+  "status": "error",
+  "message": "错误原因",
+  "raw_output": "..."
+}
+```
+
+### 示例对话
+
+```
+用户：帮我处理李全鸿
+AI 调用：python3 scripts/run_dialog.py score --name "李全鸿"
+AI 回复：评分完成，李全鸿总分 100/100，档位 S，优先录用。是否写入飞书？[写入/跳过/退出]
+
+用户：写入
+AI 调用：python3 scripts/run_dialog.py resume --token ckpt-xxx --decision "写入"
+AI 回复：✅ 已写入飞书，李全鸿档位 S，优先录用。
+```
+
+### 注意事项
+
+- 所有调用都在 `cd ~/.agents/skills/loc-resume-screening` 下执行
+- 不要把原始命令行输出粘给用户，要转成自然语言
+- checkpoint 的 token 要记在当前对话上下文里，不要丢失
+- TEST_MODE 下邮件发到测试邮箱，要告知用户
+- `score` 操作约需 10-30 秒，可告知用户「正在评分，请稍候」
+
+
 ## 参考文档
 
 - 安装引导：[`references/onboarding.md`](references/onboarding.md)
@@ -313,6 +403,13 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
 ---
 
 ## 📋 版本更新记录
+
+### v2.4（2026-06-10）
+- ✨ 新增 `run_dialog.py`：对话驱动层核心脚本，AI 调用后获得结构化 JSON，自动转化为自然语言与用户交互
+- ✨ `run_dialog.py` 支持 `score` / `test-email` / `contract` / `resume` 四个子命令
+- ✨ `score` 子命令以后台方式运行评分，捕获 `⏸ [CHECKPOINT]` 行提取 token 和 summary
+- ✨ `resume` 子命令将用户决策写入 checkpoint 文件，让后台脚本继续执行
+- 📝 SKILL.md 新增「对话驱动模式（生产使用）」section，含触发语映射、AI 执行流程、JSON 格式说明
 
 ### v2.3（2026-06-10）
 - ✨ 新增 `workflow_runner.py`：v2 工作流统一入口，支持 `status` / `next` / `score` / `test-email` / `contract` / `resume` / `list` 7 个子命令
