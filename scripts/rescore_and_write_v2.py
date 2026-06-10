@@ -59,11 +59,13 @@ def process_one(
     write_lark_log: bool,
     index: int,
     total: int,
+    dialog: bool = False,
 ) -> str:
     """
     处理单条候选人记录，返回结果状态：'ok' / 'skip' / 'error'
 
     interactive=True 时，评分完成后暂停，等待人确认是否写入。
+    dialog=True 时，使用异步 dialog 模式（不阻塞终端）。
     """
     rid    = rec.get("record_id", "?")
     fields = rec.get("fields", {})
@@ -204,19 +206,40 @@ def process_one(
 
     # ── Step 7: Human Decision 节点（仅 interactive 模式）────────────────────
     if interactive:
-        decision = wf.checkpoint(
-            node="确认写入飞书",
-            context={
-                "候选人":   name,
-                "总分":     f"{final_score}/100",
-                "档位":     final_tier,
-                "AI建议":   ai_suggest,
-                "有效简历": valid_label,
-                "DRY-RUN":  "是（不会实际写入）" if dry_run else "否（将写入飞书）",
-            },
-            prompt="是否确认将以上评分写入飞书？",
-            options=["写入", "跳过", "退出"],
-        )
+        ckpt_context = {
+            "候选人":   name,
+            "总分":     f"{final_score}/100",
+            "档位":     final_tier,
+            "AI建议":   ai_suggest,
+            "有效简历": valid_label,
+            "DRY-RUN":  "是（不会实际写入）" if dry_run else "否（将写入飞书）",
+        }
+
+        if dialog:
+            # dialog 模式：非阻塞，写文件，等待外部决策
+            checkpoint_token = wf.checkpoint(
+                node="确认写入飞书",
+                context=ckpt_context,
+                prompt="是否确认将以上评分写入飞书？",
+                options=["写入", "跳过", "退出"],
+                mode="dialog",
+            )
+            # 等待外部决策（阻塞式轮询，适合后台运行）
+            decision = wf.wait_for_resume(checkpoint_token)
+            if decision == "timeout":
+                print(f"\n⚠️  等待决策超时（token={checkpoint_token}），跳过写入")
+                wf.trace("决策超时", input_summary=name, output_summary="超时跳过", status=StepStatus.SKIPPED)
+                wf.summary()
+                return "skip"
+        else:
+            # cli 模式：阻塞终端等待输入
+            decision = wf.checkpoint(
+                node="确认写入飞书",
+                context=ckpt_context,
+                prompt="是否确认将以上评分写入飞书？",
+                options=["写入", "跳过", "退出"],
+                mode="cli",
+            )
 
         if decision == "退出":
             print("\n⚠️  用户选择退出，终止处理")
@@ -250,11 +273,13 @@ def main():
     parser.add_argument("--limit",        type=int, default=0, help="只处理前 N 条")
     parser.add_argument("--interactive",  action="store_true", help="启用 Human Decision 确认节点")
     parser.add_argument("--no-lark-log",  action="store_true", help="不写飞书流程日志")
+    parser.add_argument("--dialog",        action="store_true", help="使用 dialog 模式 checkpoint（异步，不阻塞终端）")
     args = parser.parse_args()
 
     dry_run        = args.dry_run
     interactive    = args.interactive
     write_lark_log = not args.no_lark_log
+    dialog         = args.dialog
 
     # interactive 批量处理时警告
     if interactive and not args.record_id and not args.limit:
@@ -297,6 +322,7 @@ def main():
             write_lark_log=write_lark_log,
             index=i,
             total=len(records),
+            dialog=dialog,
         )
         if status == "ok":
             ok_count += 1

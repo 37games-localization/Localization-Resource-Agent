@@ -19,7 +19,7 @@ import json
 import uuid
 import time
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Callable, Any
 import sys
@@ -243,6 +243,7 @@ class WorkflowEngine:
         prompt: str = "",
         options: list[str] = None,
         handler: Callable[[str], Any] = None,
+        mode: str = "cli",
     ) -> str:
         """
         Human Decision 节点：打印上下文，等待人输入决策。
@@ -253,8 +254,11 @@ class WorkflowEngine:
             prompt    : 提示语，告诉人需要做什么决策
             options   : 可选项列表，如 ["通过", "拒绝", "补充"]
             handler   : 可选的决策后处理函数，接收 decision str
+            mode      : "cli"（阻塞终端）或 "dialog"（异步，返回 checkpoint_token）
 
-        返回：人输入的决策字符串
+        返回：
+            mode="cli"    → 人输入的决策字符串
+            mode="dialog" → checkpoint_token 字符串
         """
         step = WorkflowStep(
             run_id=self.run_id,
@@ -267,7 +271,13 @@ class WorkflowEngine:
         self.steps.append(step)
         self._pending_checkpoint = step
 
-        # ── 打印暂停信息 ──
+        self._write_log_to_lark(step)
+
+        # ── dialog 模式：异步，不阻塞 ──────────────────────────────────────────
+        if mode == "dialog":
+            return self._checkpoint_dialog(node, context, prompt, options, step)
+
+        # ── cli 模式：打印暂停信息 ──────────────────────────────────────────────
         if not self.silent:
             print(f"\n{'━'*60}")
             print(f"  ⏸  需要你的决策：{node}")
@@ -281,8 +291,6 @@ class WorkflowEngine:
                 opts = " / ".join(f"[{o}]" for o in options)
                 print(f"  选项：{opts}")
             print()
-
-        self._write_log_to_lark(step)
 
         # ── 等待输入 ──
         decision = self._wait_for_decision(prompt, options)
@@ -310,6 +318,116 @@ class WorkflowEngine:
 
         self._pending_checkpoint = None
         return decision
+
+    def _checkpoint_dialog(
+        self,
+        node: str,
+        context: dict,
+        prompt: str,
+        options: list,
+        step: "WorkflowStep",
+    ) -> str:
+        """
+        Dialog 模式内部实现：
+        - 生成 checkpoint_token
+        - 把待决策信息写入 ~/.loc-resume-checkpoints/{token}.json
+        - 打印结构化输出
+        - 返回 checkpoint_token（不阻塞）
+        """
+        # 生成唯一 token
+        checkpoint_token = f"ckpt-{self.run_id}-{step.step_id}"
+
+        # 确保目录存在
+        ckpt_dir = Path.home() / ".loc-resume-checkpoints"
+        ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+        # 构建 checkpoint 数据
+        ckpt_data = {
+            "token":      checkpoint_token,
+            "run_id":     self.run_id,
+            "node":       node,
+            "context":    context or {},
+            "prompt":     prompt,
+            "options":    options or [],
+            "status":     "waiting",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "decision":   None,
+        }
+
+        ckpt_file = ckpt_dir / f"{checkpoint_token}.json"
+        ckpt_file.write_text(
+            json.dumps(ckpt_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        # 打印结构化输出（OpenClaw 主 session 读取后转发给用户）
+        print(f"\n⏸ [CHECKPOINT] node={node} token={checkpoint_token}")
+        if context:
+            ctx_parts = []
+            for k, v in context.items():
+                ctx_parts.append(f"{k}: {v}")
+            print(" | ".join(ctx_parts))
+        if prompt:
+            print(prompt)
+        if options:
+            print(f"请回复：{' / '.join(options)}")
+
+        self._pending_checkpoint = step
+        return checkpoint_token
+
+    def resume(self, checkpoint_token: str, decision: str) -> bool:
+        """
+        从外部传入决策，更新 checkpoint 文件状态。
+
+        参数：
+            checkpoint_token : checkpoint() dialog 模式返回的 token
+            decision         : 人的决策字符串
+
+        返回：
+            True  → 成功
+            False → token 不存在或已过期
+        """
+        ckpt_file = Path.home() / ".loc-resume-checkpoints" / f"{checkpoint_token}.json"
+        if not ckpt_file.exists():
+            return False
+
+        try:
+            ckpt_data = json.loads(ckpt_file.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+
+        ckpt_data["status"]   = "decided"
+        ckpt_data["decision"] = decision
+        ckpt_file.write_text(
+            json.dumps(ckpt_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return True
+
+    def wait_for_resume(self, checkpoint_token: str, timeout_seconds: int = 3600) -> str:
+        """
+        轮询 checkpoint 文件，直到 status=="decided" 或超时。
+
+        参数：
+            checkpoint_token : checkpoint() dialog 模式返回的 token
+            timeout_seconds  : 超时秒数，默认 3600（1小时）
+
+        返回：decision 字符串，超时返回 "timeout"
+        """
+        ckpt_file = Path.home() / ".loc-resume-checkpoints" / f"{checkpoint_token}.json"
+        deadline  = time.time() + timeout_seconds
+
+        while time.time() < deadline:
+            if ckpt_file.exists():
+                try:
+                    ckpt_data = json.loads(ckpt_file.read_text(encoding="utf-8"))
+                    if ckpt_data.get("status") == "decided":
+                        return ckpt_data.get("decision", "")
+                except Exception:
+                    pass
+            time.sleep(2)
+
+        return "timeout"
 
     def _wait_for_decision(self, prompt: str, options: list[str]) -> str:
         """从终端读取人的决策输入"""
