@@ -18,14 +18,98 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, is_test_mode, get_test_email
 from workflow_engine import WorkflowEngine, StepStatus
 
-# 复用原版所有工具函数，不重复实现
+# 复用原版工具函数（build_email / send_email 有重名 bug，本文件自行实现）
 from send_test_email import (
     BASE_TOKEN, TABLE_ID, TEST_MODE, TEST_EMAIL,
     FLD_NAME, FLD_EMAIL, FLD_LANG_PAIR, FLD_STATUS, FLD_TEST_SENT_AT,
     VALID_EXTS,
     lark_cli, extract_text, fetch_records, update_record,
-    summarize_attachment, build_email, send_email, list_records,
+    summarize_attachment, list_records,
 )
+
+
+def _build_subject_body(name: str, lang_pair: str, lang: str, attachment_name: str):
+    """构建邮件主题和正文（不涉及文件操作）"""
+    if lang == "zh":
+        subject = f"【Localization Team】翻译能力测试 - {name}"
+        body = f"""您好，{name}，
+
+感谢您对本次翻译合作的兴趣！
+
+我们已审阅您的简历，希望进一步了解您的翻译水平。请查收附件中的翻译测试题（{attachment_name}）。
+
+测试说明：
+- 语言方向：{lang_pair or '请参考附件说明'}
+- 请在收到后 5 个工作日内完成并将译文发回此邮箱
+- 如有任何疑问，欢迎随时联系
+
+期待您的回复！
+
+此致
+Localization Team"""
+    else:
+        subject = f"[Localization Team] Translation Test - {name}"
+        body = f"""Dear {name},
+
+Thank you for your interest in collaborating with us!
+
+We have reviewed your resume and would like to assess your translation skills. Please find the attached translation test ({attachment_name}).
+
+Test details:
+- Language pair: {lang_pair or 'Please refer to the attachment'}
+- Please complete and reply within 5 business days
+- Feel free to reach out if you have any questions
+
+We look forward to hearing from you!
+
+Best regards,
+Localization Team"""
+    return subject, body
+
+
+def _send_email(to_email: str, subject: str, body: str, attachment: Path, draft: bool = False):
+    """发送邮件（含附件），支持草稿模式"""
+    import smtplib, ssl
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
+
+    smtp      = get_smtp(_CFG)
+    actual_to = TEST_EMAIL if TEST_MODE else to_email
+
+    msg = MIMEMultipart()
+    msg["From"]    = smtp.get("user", "")
+    msg["To"]      = actual_to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    with open(attachment, "rb") as fh:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(fh.read())
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f'attachment; filename="{attachment.name}"')
+    msg.attach(part)
+
+    if draft:
+        from config_loader import get_paths
+        draft_dir = Path(get_paths(_CFG).get("contract_output", "~/Documents/loc-contracts/output/")).expanduser() / "drafts"
+        draft_dir.mkdir(parents=True, exist_ok=True)
+        safe_name  = re.sub(r'[^\w\-\u4e00-\u9fff.]', '_', to_email)
+        draft_path = draft_dir / f"测试题_{safe_name}.eml"
+        draft_path.write_text(msg.as_string(), encoding="utf-8")
+        print(f"📝 草稿已保存：{draft_path}")
+        return
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode    = ssl.CERT_NONE
+    with smtplib.SMTP_SSL(smtp["host"], smtp.get("port", 465), context=ctx) as srv:
+        srv.login(smtp["user"], smtp["password"])
+        srv.sendmail(smtp["user"], actual_to, msg.as_string())
+
+    tag = f"⚠️  [测试模式] 发到 {actual_to}（原始目标：{to_email}）" if TEST_MODE else f"✅ 已发至 {actual_to}"
+    print(tag)
 
 _CFG = load_config()
 
@@ -119,7 +203,7 @@ def main():
 
     # ── Step 4: 构建邮件 ──────────────────────────────────────────────────────
     with wf.step("构建邮件内容", input_summary=f"语言: {'中文' if lang == 'zh' else '英文'}") as s:
-        subject, body = build_email(name, lang_pair, lang, file_path.name)
+        subject, body = _build_subject_body(name, lang_pair, lang, file_path.name)
         actual_to = TEST_EMAIL if TEST_MODE else email
         s.finish(output=f"主题: {subject[:40]}…  收件人: {actual_to}")
 
@@ -173,7 +257,7 @@ def main():
 
     # ── Step 6: 发送邮件 ──────────────────────────────────────────────────────
     with wf.step("发送邮件", input_summary=f"→ {actual_to}  附件: {file_path.name}") as s:
-        send_email(email, subject, body, file_path, draft=args.draft)
+        _send_email(email, subject, body, file_path, draft=args.draft)
         s.finish(output="草稿已保存" if args.draft else f"✅ 发送成功 → {actual_to}")
 
     # ── Step 7: 更新飞书状态 ──────────────────────────────────────────────────
