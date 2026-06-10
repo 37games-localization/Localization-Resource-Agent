@@ -232,3 +232,35 @@ git log --oneline
 | v2 何时合并到 main | 未定 | 测试全部通过后 |
 | dialog 模式在 OpenClaw 对话里的触发协议 | 已实现文件机制，SKILL.md 待补充 | — |
 | Layer 2 标准任务集定义 | 待讨论 | 需要 penny 提供典型指令列表 |
+
+---
+
+## 七、待办事项
+
+> 按优先级排列，dialog-driver 子 agent 完成后依次推进
+
+### 🔴 P0 — dialog-driver 完成后立即做
+
+- [ ] **checkpoint 持久化写飞书**（2026-06-10 确认方案）
+  - 脚本跑到 dialog checkpoint 时，把 token 写入候选人记录的「自由状态补充」字段
+  - resume 完成后清空该字段
+  - 触发语：「有哪些候选人在等我决策」→ 查飞书「自由状态补充」非空的记录列出来
+  - 触发语：「继续处理XXX」→ 读飞书拿 token，直接 resume，无需用户记 token
+  - **设计原则**：零新增字段，复用现有「招募状态」+「自由状态补充」，跨天/跨 session 安全恢复
+
+- [ ] **SKILL.md 补充「继续XXX」「有哪些在等我」触发语**
+
+- [ ] **端到端对话 demo 验证**：完整跑一次「帮我处理李全鸿」→ checkpoint → 「写入」→ 完成
+
+### 🟡 P1 — demo 录制前
+
+- [ ] **填写 SMTP 配置**（smtp.user / smtp.password）——发测试题步骤依赖
+- [ ] **填写 contract_table_id**——合同步骤依赖
+- [ ] **录制全流程 demo**（评分 → 确认 → 写入飞书，在对话框里完成，不碰命令行）
+
+### 🟢 P2 — 稳定后
+
+- [ ] **Phase 4：并发任务调度**（主 session spawn 子 agent，多候选人同时处理）
+- [ ] **Layer 2 Agent 行为评测框架**（任务完成率 / 工具调用准确率 / 成本）
+- [ ] **v2 合并到 main**（所有测试通过后）
+- [ ] **其余脚本接入 WorkflowEngine**（check_signed_contract / send_rejection_email / update_status）
