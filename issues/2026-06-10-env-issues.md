@@ -52,8 +52,9 @@ log_id: 202606100939133703D0E522DA542D5893
 脚本不崩溃，但 PDF 简历内容完全丢失，评分仅依赖飞书表字段，精度下降。
 
 **原因**  
-`(base)` conda 环境下 `python3` 指向的 Python 没有 pymupdf，
-系统 Python 3.10 有，但 conda 环境不共享。
+`(base)` conda 环境下 `python3` 指向的 Python 没有 pymupdf。
+`pip3 install pymupdf` 装到了系统 Python 3.10，conda 环境完全隔离，不共享。
+**修复命令**：在 conda 环境内用 `pip install pymupdf`（不带 3）。
 
 **修复方向（check_config）**  
 - `import fitz` 尝试导入，失败时打印安装命令
