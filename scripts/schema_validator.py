@@ -380,7 +380,7 @@ def save_mapping(table_results: list[dict]):
 
 def main():
     parser = argparse.ArgumentParser(description="Validate Lark table schema for loc-resume-screening")
-    parser.add_argument("--table", choices=["candidate", "workflow_log", "contract_info", "all"], default="candidate")
+    parser.add_argument("--table", choices=["candidate", "pricing_rules", "workflow_log", "contract_info", "all"], default="candidate")
     parser.add_argument("--base-token", help="自定义 base token，仅 --table 非 all 时可用")
     parser.add_argument("--table-id", help="自定义 table id，仅 --table 非 all 时可用")
     parser.add_argument("--apply", action="store_true", help="创建缺失字段并重新生成映射")

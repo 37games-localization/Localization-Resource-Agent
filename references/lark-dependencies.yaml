@@ -27,6 +27,48 @@ last_updated: "2026-05-28"
 
 resources:
 
+  # ── 0. 评分规则配置表（生产评分价格来源） ───────────────────
+  - id: pricing_rules
+    desc: 评分规则配置表（各语言对 AIPE/人工翻译预期价与上限价）
+    url: "<由项目维护人提供>"
+    base_token: "<填写到 config.local.yaml:lark.base_token>"
+    table_id: "<填写到 config.local.yaml:lark.rules_table_id>"
+    used_by:
+      - scripts/pricing_rules.py
+      - scripts/resume_screening_engine_v2.py
+      - scripts/rescore_and_write.py
+      - scripts/rescore_and_write_v2.py
+      - scripts/evaluate_resumes.py
+    critical_fields:
+      - field_id: "<field_id>"
+        field_name: "语言对"
+        mapped_to: "pricing.language_pair"
+        risk_if_deleted: HIGH
+      - field_id: "<field_id>"
+        field_name: "AIPE预期价"
+        mapped_to: "pricing.aipe_target"
+        risk_if_deleted: HIGH
+      - field_id: "<field_id>"
+        field_name: "AIPE上限价"
+        mapped_to: "pricing.aipe_max"
+        risk_if_deleted: HIGH
+      - field_id: "<field_id>"
+        field_name: "翻译预期价"
+        mapped_to: "pricing.translation_target"
+        risk_if_deleted: HIGH
+      - field_id: "<field_id>"
+        field_name: "翻译上限价"
+        mapped_to: "pricing.translation_max"
+        risk_if_deleted: HIGH
+      - field_id: "<field_id>"
+        field_name: "规则版本"
+        mapped_to: "pricing.version"
+        risk_if_deleted: MEDIUM
+      - field_id: "<field_id>"
+        field_name: "启用"
+        mapped_to: "pricing.enabled"
+        risk_if_deleted: MEDIUM
+
   # ── 1. 合同信息收集表（VM 发给资源商填写） ──────────────────
   - id: form_contract_collect
     desc: 合同信息收集表（资源商填写银行/证件信息）
@@ -186,7 +228,7 @@ local_files:
   - path: config.local.yaml
     desc: "本机真实配置入口（base_token / smtp / 路径等），不能提交或打包"
   - path: config/resume_screening_rules_v2.json
-    desc: "评分规则配置"
+    desc: "包内评分结构规则；价格规则仅用于 TEST_MODE / 显式本地 fallback，生产价格规则以 Lark 评分规则配置表为准"
   - path: contracts/templates/
     desc: "合同模板本地副本（与飞书 AI合同模版 字段保持同步）"
 

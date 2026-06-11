@@ -12,6 +12,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from lark_cli_utils import normalize_record_list_data
 from evaluate_resumes import clamp_final_score
+from pricing_rules import PricingRulesError
+from resume_screening_engine_v2 import ResumeScreeningEngineV2
 from generate_contract import (
     ACCOUNT_TYPE_FIELD_ID,
     FLD_BANK_ADDR,
@@ -192,6 +194,58 @@ class ProductionGuardrailTest(unittest.TestCase):
 
         self.assertIn("candidate.contract_id", schema_text)
         self.assertIn("candidate.supplier_id", schema_text)
+
+    def test_required_schema_contains_pricing_rules_table(self):
+        schema_text = (ROOT / "references" / "lark-required-schema.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("pricing_rules:", schema_text)
+        self.assertIn("pricing.language_pair", schema_text)
+        self.assertIn("pricing.aipe_target", schema_text)
+        self.assertIn("pricing.translation_max", schema_text)
+
+    def test_lark_pricing_rules_override_engine_price_thresholds(self):
+        lark_rules = {
+            "zh-CN>en": {
+                "aipe_target": 0.01,
+                "aipe_max": 0.02,
+                "trans_target": 0.01,
+                "trans_max": 0.02,
+            }
+        }
+        with patch("resume_screening_engine_v2.load_price_rules", return_value=(lark_rules, {"source": "lark", "count": 1})):
+            engine = ResumeScreeningEngineV2(allow_local_rules=False, require_lark_rules=True)
+
+        result = engine.calculate_price_score({
+            "语言对": "zh-CN>en",
+            "AIPE单价": 0.03,
+            "人工翻译单价": "",
+            "报价商议空间": "固定",
+        })
+
+        self.assertLess(result["score"], 25)
+        self.assertEqual(result["target"], 0.01)
+        self.assertEqual(result["max"], 0.02)
+        self.assertEqual(result["rule_source"], "lark")
+
+    def test_missing_lark_pricing_rule_blocks_production_scoring(self):
+        lark_rules = {
+            "zh-CN>en": {
+                "aipe_target": 0.03,
+                "aipe_max": 0.04,
+                "trans_target": 0.04,
+                "trans_max": 0.05,
+            }
+        }
+        with patch("resume_screening_engine_v2.load_price_rules", return_value=(lark_rules, {"source": "lark", "count": 1})):
+            engine = ResumeScreeningEngineV2(allow_local_rules=False, require_lark_rules=True)
+
+        with self.assertRaisesRegex(PricingRulesError, "找不到语言对"):
+            engine.calculate_price_score({
+                "语言对": "en>pl",
+                "AIPE单价": 0.03,
+                "人工翻译单价": "",
+                "报价商议空间": "固定",
+            })
 
 
 class BadcaseProtocolTest(unittest.TestCase):

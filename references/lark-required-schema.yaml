@@ -216,6 +216,57 @@ tables:
         required: false
         create_if_missing: true
 
+  pricing_rules:
+    desc: "评分规则配置表：各语言对 AIPE/人工翻译价格阈值，生产评分价格维度的唯一来源"
+    table_name: "评分规则配置"
+    create_if_missing_table: false
+    config_keys:
+      base_token: "lark.base_token"
+      table_id: "lark.rules_table_id"
+    required_fields:
+      - key: pricing.language_pair
+        name: "语言对"
+        aliases: ["Language pair", "lang_pair"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: pricing.aipe_target
+        name: "AIPE预期价"
+        aliases: ["AIPE目标价", "AIPE target"]
+        type: number
+        required: true
+        create_if_missing: true
+      - key: pricing.aipe_max
+        name: "AIPE上限价"
+        aliases: ["AIPE最高价", "AIPE max"]
+        type: number
+        required: true
+        create_if_missing: true
+      - key: pricing.translation_target
+        name: "翻译预期价"
+        aliases: ["人工翻译预期价", "Translation target"]
+        type: number
+        required: true
+        create_if_missing: true
+      - key: pricing.translation_max
+        name: "翻译上限价"
+        aliases: ["人工翻译上限价", "Translation max"]
+        type: number
+        required: true
+        create_if_missing: true
+      - key: pricing.version
+        name: "规则版本"
+        aliases: ["版本", "Version"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: pricing.enabled
+        name: "启用"
+        aliases: ["是否启用", "Enabled"]
+        type: checkbox
+        required: false
+        create_if_missing: true
+
   workflow_log:
     desc: "流程日志表：每个 Agent 操作动作记一行，支撑可视化和 checkpoint 恢复"
     table_name: "Agent流程日志"

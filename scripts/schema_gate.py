@@ -23,12 +23,12 @@ REQUIRED_SCHEMA_PATH = SKILL_ROOT / "references" / "lark-required-schema.yaml"
 
 
 OPERATION_TABLES = {
-    "score": ["candidate", "workflow_log"],
+    "score": ["candidate", "pricing_rules", "workflow_log"],
     "test-email": ["candidate", "workflow_log"],
     "contract": ["contract_info", "workflow_log"],
     "waiting": ["workflow_log"],
     "resume": ["workflow_log"],
-    "all": ["candidate", "workflow_log", "contract_info"],
+    "all": ["candidate", "pricing_rules", "workflow_log", "contract_info"],
 }
 
 

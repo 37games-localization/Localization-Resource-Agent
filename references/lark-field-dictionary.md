@@ -43,6 +43,18 @@
 | `candidate.expected_result` | 期望结果 | VM 对 badcase 的一句话期望结果。 | 读/写 | 否 | Badcase 回流 |
 | `candidate.badcase_snapshot` | Badcase快照 | 自动生成的脱敏 snapshot JSON 附件。 | 写/读 | 否 | Badcase 回流 |
 
+## 评分规则配置表 `pricing_rules`
+
+| key | 建议表头 | 用途 | 读/写 | 必需 | 影响节点 |
+|---|---|---|---|---:|---|
+| `pricing.language_pair` | 语言对 | 价格规则命中的语言对 key，例如 `zh-CN>en` 或 `简中>英语`。 | 读 | 是 | 评分 |
+| `pricing.aipe_target` | AIPE预期价 | AIPE 报价低于或等于该值时价格维度满分。 | 读 | 是 | 评分 |
+| `pricing.aipe_max` | AIPE上限价 | AIPE 报价高于该值时价格维度判为不合格区间。 | 读 | 是 | 评分 |
+| `pricing.translation_target` | 翻译预期价 | 人工翻译报价低于或等于该值时价格维度满分。 | 读 | 是 | 评分 |
+| `pricing.translation_max` | 翻译上限价 | 人工翻译报价高于该值时价格维度判为不合格区间。 | 读 | 是 | 评分 |
+| `pricing.version` | 规则版本 | 标记价格规则版本，便于追溯评分依据。 | 读 | 否 | 评分、审计 |
+| `pricing.enabled` | 启用 | 可临时停用某条语言对规则；空值默认启用。 | 读 | 否 | 评分 |
+
 ## 流程日志表 `workflow_log`
 
 | key | 建议表头 | 用途 | 读/写 | 必需 | 影响节点 |

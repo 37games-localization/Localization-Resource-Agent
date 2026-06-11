@@ -4,7 +4,7 @@ evaluate_resumes.py
 ===================
 方向B 新脚本：LLM 一次性完成简历解析 + 评分，规则层只做价格硬校验。
 
-价格标准默认读取包内规则；如配置了飞书「评分规则配置」表，则优先从飞书读取。
+生产模式必须读取飞书「评分规则配置」表；TEST_MODE 或显式参数才允许包内规则。
 LLM 输出结构化 JSON，直接写回飞书候选人表。
 
 用法：
@@ -33,6 +33,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_lark, get_llm_api_key
 from lark_cli_utils import normalize_record_list_data
+from pricing_rules import PricingRulesError, load_price_rules
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 _CFG        = load_config()
@@ -191,36 +192,7 @@ def fetch_price_rules() -> dict:
     如 config.local.yaml 配置了 lark.rules_table_id，则优先读取飞书规则表，
     便于后续团队替换或集中维护各语种单价范围。
     """
-    if not BASE_TOKEN or not RULES_TABLE:
-        return load_local_price_rules()
-    resp = lark_cli(
-        "api", "GET",
-        f"/open-apis/bitable/v1/apps/{BASE_TOKEN}/tables/{RULES_TABLE}/records",
-        "--params", json.dumps({"page_size": 100}),
-        "--format", "json",
-    )
-    rules = {}
-    for item in resp.get("data", {}).get("items", []):
-        f = item["fields"]
-        def gv(k):
-            v = f.get(k)
-            if v is None: return None
-            if isinstance(v, list): return v[0].get("text", "") if v else ""
-            return v
-        lang = str(gv("语言对") or "").strip()
-        if not lang:
-            continue
-        # 标准化语言对 key（去空格，统一符号）
-        key = lang.replace(" ", "").replace("＞", ">")
-        rules[key] = {
-            "aipe_target":  float(gv("AIPE预期价") or 0),
-            "aipe_max":     float(gv("AIPE上限价") or 0),
-            "trans_target": float(gv("翻译预期价") or 0),
-            "trans_max":    float(gv("翻译上限价") or 0),
-        }
-    if not rules:
-        print("⚠️  飞书评分规则表为空，回退使用包内默认规则")
-        return load_local_price_rules()
+    rules, _meta = load_price_rules()
     return rules
 
 
@@ -613,18 +585,21 @@ def main():
     parser.add_argument("--name",      help="只处理该姓名")
     parser.add_argument("--record-id", help="只处理该 record_id")
     parser.add_argument("--limit",     type=int, help="只处理前N条")
+    parser.add_argument("--allow-local-rules", action="store_true", help="仅测试/应急：允许使用包内价格规则")
     args = parser.parse_args()
 
     if args.dry_run:
         print("⚠️  DRY-RUN 模式：不写入飞书\n")
 
     # 读价格规则
-    if BASE_TOKEN and RULES_TABLE:
-        print("读取飞书价格规则配置...")
-    else:
-        print("读取包内默认价格规则配置...")
-    price_rules = fetch_price_rules()
-    print(f"✅ 已读取 {len(price_rules)} 条语言对价格规则\n")
+    try:
+        price_rules, price_meta = load_price_rules(allow_local_rules=args.allow_local_rules)
+    except PricingRulesError as exc:
+        print(f"❌ 价格规则不可用：{exc}")
+        sys.exit(2)
+    source_label = "飞书价格规则配置" if price_meta.get("source") == "lark" else "包内测试价格规则"
+    print(f"读取{source_label}...")
+    print(f"✅ 已读取 {len(price_rules)} 条语言对价格规则（来源：{price_meta.get('source')}）\n")
 
     # 读候选人记录
     print("拉取飞书候选人记录...")

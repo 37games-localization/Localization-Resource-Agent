@@ -6,11 +6,19 @@ import re
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
+from pricing_rules import PricingRulesError, load_price_rules
+
 
 class ResumeScreeningEngineV2:
     """简历筛选规则引擎 V2 - 严格遵循原始评分逻辑"""
     
-    def __init__(self, config_path: str = None):
+    def __init__(
+        self,
+        config_path: str = None,
+        *,
+        allow_local_rules: bool = True,
+        require_lark_rules: bool = False,
+    ):
         """初始化引擎"""
         if config_path is None:
             config_path = Path(__file__).parent.parent / "config" / "resume_screening_rules_v2.json"
@@ -18,12 +26,36 @@ class ResumeScreeningEngineV2:
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
         
-        self.price_rules = self.config['price_rules']
+        if require_lark_rules or not allow_local_rules:
+            lark_rules, meta = load_price_rules(
+                allow_local_rules=allow_local_rules,
+                require_lark_rules=require_lark_rules,
+            )
+            self.price_rules = self._price_rules_for_engine(lark_rules)
+            self.price_rules_meta = meta
+        else:
+            self.price_rules = self.config['price_rules']
+            self.price_rules_meta = {"source": "local", "count": 0}
         self.job_requirements = self.config['job_requirements']
         self.basic_validation = self.config.get('basic_validation', {})
         self.business_types = self.config.get('business_types', {})
         self.valid_resume_rules = self.config.get('valid_resume_rules', {})
         self.valid_resume_rules = self.config.get('valid_resume_rules', {})
+
+    @staticmethod
+    def _price_rules_for_engine(flat_rules: dict) -> dict:
+        price_rules = {"aipe": {}, "translation": {}}
+        for key, rule in flat_rules.items():
+            for normalized_key in {key, str(key).lower()}:
+                price_rules["aipe"][normalized_key] = {
+                    "target": rule["aipe_target"],
+                    "max": rule["aipe_max"],
+                }
+                price_rules["translation"][normalized_key] = {
+                    "target": rule["trans_target"],
+                    "max": rule["trans_max"],
+                }
+        return price_rules
     
     def validate_basic(self, candidate_data: Dict) -> Dict:
         """
@@ -466,14 +498,19 @@ class ResumeScreeningEngineV2:
                 "is_below_max": False
             }
         
-        # 查找价格规则（默认使用 zh-CN>en 规则）
+        # 查找价格规则
         price_config = self.price_rules.get('aipe', {}).get(lang_pair_normalized) or \
                        self.price_rules.get('translation', {}).get(lang_pair_normalized)
         
         if price_config is None:
-            # 使用默认规则
-            target = 0.03
-            max_price = 0.04
+            if self.price_rules_meta.get("source") == "local":
+                target = 0.03
+                max_price = 0.04
+            else:
+                raise PricingRulesError(
+                    f"找不到语言对「{lang_pair}」({lang_pair_normalized}) 的价格规则。"
+                    "请在 Lark「评分规则配置」表维护该语言对后重试。"
+                )
         else:
             target = price_config.get('target', 0.03)
             max_price = price_config.get('max', 0.04)
@@ -512,6 +549,8 @@ class ResumeScreeningEngineV2:
             "negotiation_factor": negotiation_factor,
             "target": target,
             "max": max_price,
+            "rule_source": self.price_rules_meta.get("source", "unknown"),
+            "rule_count": self.price_rules_meta.get("count", 0),
             "is_below_target": is_below_target,
             "is_below_max": is_below_max
         }

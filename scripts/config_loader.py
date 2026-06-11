@@ -121,6 +121,8 @@ def validate_config(cfg: dict) -> list[str]:
         issues.append("lark.base_token 未填写")
     if not lark.get("resume_table_id"):
         issues.append("lark.resume_table_id 未填写")
+    if not is_test_mode(cfg) and not lark.get("rules_table_id"):
+        issues.append("生产模式必须填写 lark.rules_table_id（评分规则配置表）")
     if not lark.get("contract_table_id"):
         issues.append("lark.contract_table_id 未填写")
 

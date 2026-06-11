@@ -9,6 +9,7 @@ rescore_and_write.py 的 v2 版本：接入 WorkflowEngine，实现：
 与原版完全兼容，参数接口不变，新增：
   --interactive   启用 Human Decision 节点（批量时不建议开启）
   --no-lark-log   不写飞书流程日志（仅终端展示）
+  --allow-local-rules  仅测试/应急：允许使用包内价格规则
 
 用法：
     # 批量重算（可视化，自动推进，行为与原版一致）
@@ -33,7 +34,8 @@ ENGINE_DIR = Path(__file__).parent
 sys.path.insert(0, str(ENGINE_DIR))
 
 from resume_screening_engine_v2 import ResumeScreeningEngineV2
-from config_loader import load_config, get_lark
+from pricing_rules import PricingRulesError
+from config_loader import load_config, get_lark, is_test_mode
 from workflow_engine import WorkflowEngine, StepStatus
 
 # ── 从原版复用配置和工具函数 ──────────────────────────────────────────────────
@@ -275,6 +277,7 @@ def main():
     parser.add_argument("--interactive",  action="store_true", help="启用 Human Decision 确认节点")
     parser.add_argument("--no-lark-log",  action="store_true", help="不写飞书流程日志")
     parser.add_argument("--dialog",        action="store_true", help="使用 dialog 模式 checkpoint（异步，不阻塞终端）")
+    parser.add_argument("--allow-local-rules", action="store_true", help="仅测试/应急：允许使用包内价格规则")
     args = parser.parse_args()
 
     dry_run        = args.dry_run
@@ -294,8 +297,18 @@ def main():
 
     # 初始化评分引擎
     print("初始化评分引擎…")
-    engine_v2 = ResumeScreeningEngineV2()
-    print("✅ 引擎加载完成\n")
+    cfg = load_config()
+    require_lark_rules = not is_test_mode(cfg)
+    try:
+        engine_v2 = ResumeScreeningEngineV2(
+            allow_local_rules=args.allow_local_rules or is_test_mode(cfg),
+            require_lark_rules=require_lark_rules,
+        )
+    except PricingRulesError as exc:
+        print(f"❌ 价格规则不可用：{exc}")
+        sys.exit(2)
+    meta = getattr(engine_v2, "price_rules_meta", {})
+    print(f"✅ 引擎加载完成（价格规则来源：{meta.get('source', 'unknown')}，规则数：{meta.get('count', 0)}）\n")
 
     # 拉取记录
     print("拉取飞书记录…")

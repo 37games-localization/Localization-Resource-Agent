@@ -286,7 +286,8 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 ## 单点优化入口
 | 想改什么 | 文件 |
 |---------|------|
-| 评分规则（含字数阈值/档位/各语言对价格范围） | `config/resume_screening_rules_v2.json` |
+| 价格规则（各语言对目标价/上限价） | 飞书「评分规则配置」表（生产唯一来源） |
+| 评分结构规则（字数阈值/档位/有效简历判定） | `config/resume_screening_rules_v2.json` |
 | LLM 解析 prompt | `scripts/parse_resumes.py` 第 49 行 |
 | 邮件文案 | 各脚本里的 `EMAIL_TEMPLATE` |
 | 所有环境配置 | `config.local.yaml`（本机唯一入口，由 `config.example.yaml` 复制生成） |
@@ -300,10 +301,10 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 
 ### 1️⃣ 价格规则（高频更新）
 
-**文件**：`config/resume_screening_rules_v2.json`
+**生产来源**：飞书「评分规则配置」表
 
 这里存着**各语言对的目标价 + 上限价**，评分引擎用它判断资源商报价是否合理。**市场行情变了就需要来改**。
-历史价格规则已归档到 `references/legacy-pricing-rules-2026-05-28.json`，仅用于追溯；主评分流程默认读取本文件中的 `price_rules`。
+包内 `config/resume_screening_rules_v2.json` 仅作为 TEST_MODE / 显式 `--allow-local-rules` 的测试 fallback；生产评分缺 Lark 规则表、缺字段、缺语言对时必须阻断。
 
 目前配置示例：
 | 语言对 | AIPE 目标价 | 翻译 目标价 |
@@ -312,7 +313,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 | zh-CN→ja/ko | 0.04元/字 | — |
 | zh-CN→欧语系 | 0.05元/字 | — |
 
-**什么时候需要更新**：公司调价/市场行情变化时，更新对应语言对的 `target` 和 `max` 字段。
+**什么时候需要更新**：公司调价/市场行情变化时，更新飞书规则表对应语言对的 AIPE/翻译预期价和上限价。
 
 ---
 

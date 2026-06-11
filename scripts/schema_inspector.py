@@ -128,7 +128,7 @@ def normalize_fields(payload: dict) -> list[dict]:
 
 def main():
     parser = argparse.ArgumentParser(description="Inspect Lark Base table fields")
-    parser.add_argument("--table", choices=["candidate", "workflow_log", "contract_info"], help="从 config.yaml 读取对应表")
+    parser.add_argument("--table", choices=["candidate", "pricing_rules", "workflow_log", "contract_info"], help="从 config.yaml 读取对应表")
     parser.add_argument("--base-token", help="Base token")
     parser.add_argument("--table-id", help="Table ID")
     args = parser.parse_args()
