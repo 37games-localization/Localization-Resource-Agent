@@ -21,6 +21,7 @@ lark:
   # 简历收集表（评分数据主表）
   base_token: ""                 # 飞书 Base token
   resume_table_id: ""            # 简历收集表 table-id
+  rules_table_id: ""             # 评分规则配置表 table-id；evaluate_resumes.py 使用
 
   # 合同信息收集表（资源商填写银行/证件信息）
   contract_base_token: ""        # 与简历表同 base 时可填相同值

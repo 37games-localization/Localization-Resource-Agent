@@ -9,9 +9,8 @@ field_mapping.py — 合同变量名 ↔ 飞书收集表字段 ID 的映射
     references/lark-dependencies.yaml → Agent 变更处理 SOP
 
 飞书收集表信息：
-    base_token : JbkRbkGf6aAqfnsCDHHlJMjbg3b
-    table_id   : tblePA7PmmYlS936
-    表单链接    : https://g4wt0dn9mss.sg.larksuite.com/share/base/form/shrlgF4lJe3AZUz7PY5XuQ8Ugfd
+    真实 base_token / table_id 从 config.local.yaml 读取。
+    不要在本文件中填写真实 Lark token 或内部表单链接。
 
 source 类型说明：
     "form"       — 从收集表自动读取，field_id 指向对应字段
@@ -24,8 +23,10 @@ source 类型说明：
 from field_resolver import field_id_or
 
 
-FORM_BASE_TOKEN = "JbkRbkGf6aAqfnsCDHHlJMjbg3b"
-FORM_TABLE_ID   = "tblePA7PmmYlS936"
+# 保留这两个符号用于兼容旧 import。运行时请使用 config.local.yaml 中的
+# lark.contract_base_token / lark.contract_table_id。
+FORM_BASE_TOKEN = ""
+FORM_TABLE_ID   = ""
 
 # ── 账户类型路由字段 ───────────────────────────────────────────
 # 选项值：

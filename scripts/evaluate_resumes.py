@@ -4,7 +4,7 @@ evaluate_resumes.py
 ===================
 方向B 新脚本：LLM 一次性完成简历解析 + 评分，规则层只做价格硬校验。
 
-价格标准运行时从飞书「评分规则配置」表读取，不硬编码。
+价格标准运行时从飞书「评分规则配置」表读取，表 ID 从 config.local.yaml 读取。
 LLM 输出结构化 JSON，直接写回飞书候选人表。
 
 用法：
@@ -36,9 +36,9 @@ from config_loader import load_config, get_lark, get_llm_api_key
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 _CFG        = load_config()
 _LARK       = get_lark(_CFG)
-BASE_TOKEN  = _LARK.get("base_token", "") or "JbkRbkGf6aAqfnsCDHHlJMjbg3b"  # fallback 测试表
-TABLE_ID    = _LARK.get("resume_table_id", "") or "tbll1fWOund3PSgd"
-RULES_TABLE = "tbl65NXQt5ebhnHa"   # 评分规则配置表（固定，不随环境变化）
+BASE_TOKEN  = _LARK.get("base_token", "")
+TABLE_ID    = _LARK.get("resume_table_id", "")
+RULES_TABLE = _LARK.get("rules_table_id", "")
 PDF_CACHE   = Path.home() / ".loc-resume-cache"
 PDF_CACHE.mkdir(exist_ok=True)
 
@@ -184,6 +184,8 @@ def lark_cli(*args) -> dict:
 
 def fetch_price_rules() -> dict:
     """从飞书「评分规则配置」表读取价格标准，返回 {语言对标准化key: {aipe_target, aipe_max, trans_target, trans_max}}"""
+    if not BASE_TOKEN or not RULES_TABLE:
+        raise RuntimeError("缺少 lark.base_token 或 lark.rules_table_id，无法读取评分规则配置表")
     resp = lark_cli(
         "api", "GET",
         f"/open-apis/bitable/v1/apps/{BASE_TOKEN}/tables/{RULES_TABLE}/records",
