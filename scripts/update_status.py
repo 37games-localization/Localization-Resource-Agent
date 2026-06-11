@@ -13,15 +13,15 @@ update_status.py
     python3 scripts/update_status.py --list
 
     # 更新状态（交互确认）
-    python3 scripts/update_status.py --name "青木遥" --status "🔍 财务审批中"
-    python3 scripts/update_status.py --name "青木遥" --status "✅ 已入库"
+    python3 scripts/update_status.py --name "测试候选人A" --status "🔍 财务审批中"
+    python3 scripts/update_status.py --name "测试候选人A" --status "✅ 已入库"
     python3 scripts/update_status.py --record-id recXXX --status "💰 财务待登记"
 
     # 跳过确认
-    python3 scripts/update_status.py --name "青木遥" --status "✅ 已入库" --yes
+    python3 scripts/update_status.py --name "测试候选人A" --status "✅ 已入库" --yes
 
     # 只预览，不写回
-    python3 scripts/update_status.py --name "青木遥" --status "✅ 已入库" --dry-run
+    python3 scripts/update_status.py --name "测试候选人A" --status "✅ 已入库" --dry-run
 """
 
 import sys, json, argparse, subprocess

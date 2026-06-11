@@ -16,12 +16,12 @@ workflow_runner.py
   list        列出所有候选人及当前状态
 
 用法示例：
-    python3 scripts/workflow_runner.py status --name "青木遥"
-    python3 scripts/workflow_runner.py next --name "青木遥"
-    python3 scripts/workflow_runner.py next --name "青木遥" --file ~/Downloads/test.pdf
-    python3 scripts/workflow_runner.py score --name "青木遥"
-    python3 scripts/workflow_runner.py test-email --name "青木遥" --file ~/test.pdf
-    python3 scripts/workflow_runner.py contract --name "青木遥"
+    python3 scripts/workflow_runner.py status --name "测试候选人A"
+    python3 scripts/workflow_runner.py next --name "测试候选人A"
+    python3 scripts/workflow_runner.py next --name "测试候选人A" --file ~/Downloads/test.pdf
+    python3 scripts/workflow_runner.py score --name "测试候选人A"
+    python3 scripts/workflow_runner.py test-email --name "测试候选人A" --file ~/test.pdf
+    python3 scripts/workflow_runner.py contract --name "测试候选人A"
     python3 scripts/workflow_runner.py resume --token ckpt-xxx --decision "写入"
     python3 scripts/workflow_runner.py list
 """
@@ -270,7 +270,7 @@ def fetch_waiting_checkpoints(limit: int = 50) -> list[dict]:
     cfg = load_config()
     lark = get_lark(cfg)
     base_token = lark.get("base_token", "")
-    log_table_id = lark.get("log_table_id", "tblVQvjpJw9CO0kU")
+    log_table_id = lark.get("log_table_id", "<workflow_log_table_id>")
     if table_ref:
         try:
             mapped_base, mapped_table = table_ref("workflow_log")
@@ -565,12 +565,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 子命令示例：
-  status      python3 scripts/workflow_runner.py status --name "青木遥"
-  next        python3 scripts/workflow_runner.py next --name "青木遥"
-  next+file   python3 scripts/workflow_runner.py next --name "青木遥" --file ~/test.pdf
-  score       python3 scripts/workflow_runner.py score --name "青木遥"
-  test-email  python3 scripts/workflow_runner.py test-email --name "青木遥" --file ~/test.pdf
-  contract    python3 scripts/workflow_runner.py contract --name "青木遥"
+  status      python3 scripts/workflow_runner.py status --name "测试候选人A"
+  next        python3 scripts/workflow_runner.py next --name "测试候选人A"
+  next+file   python3 scripts/workflow_runner.py next --name "测试候选人A" --file ~/test.pdf
+  score       python3 scripts/workflow_runner.py score --name "测试候选人A"
+  test-email  python3 scripts/workflow_runner.py test-email --name "测试候选人A" --file ~/test.pdf
+  contract    python3 scripts/workflow_runner.py contract --name "测试候选人A"
   resume      python3 scripts/workflow_runner.py resume --token ckpt-xxx --decision "写入"
   list        python3 scripts/workflow_runner.py list
   waiting     python3 scripts/workflow_runner.py waiting

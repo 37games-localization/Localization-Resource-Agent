@@ -54,7 +54,7 @@ issues/
 ### workflow_engine.py 核心接口
 
 ```python
-engine = WorkflowEngine(candidate_name="青木遥", write_lark=True)
+engine = WorkflowEngine(candidate_name="测试候选人A", write_lark=True)
 
 # 记录单步动作
 engine.trace("读取简历", input_summary="recXXX", output_summary="字段加载完成")
@@ -85,11 +85,11 @@ engine.summary()
 
 ```bash
 python3 scripts/workflow_runner.py list                          # 列出所有候选人+状态
-python3 scripts/workflow_runner.py status --name "青木遥"        # 查看状态+建议下一步
-python3 scripts/workflow_runner.py next   --name "青木遥"        # 自动路由执行下一步
-python3 scripts/workflow_runner.py score  --name "青木遥"        # 手动触发评分
-python3 scripts/workflow_runner.py test-email --name "青木遥" --file ~/test.pdf
-python3 scripts/workflow_runner.py contract   --name "青木遥"
+python3 scripts/workflow_runner.py status --name "测试候选人A"        # 查看状态+建议下一步
+python3 scripts/workflow_runner.py next   --name "测试候选人A"        # 自动路由执行下一步
+python3 scripts/workflow_runner.py score  --name "测试候选人A"        # 手动触发评分
+python3 scripts/workflow_runner.py test-email --name "测试候选人A" --file ~/test.pdf
+python3 scripts/workflow_runner.py contract   --name "测试候选人A"
 python3 scripts/workflow_runner.py resume --token *** --decision "写入"
 ```
 
@@ -172,11 +172,11 @@ assert result["base_tier"] == snapshot["base_tier"]
 **标准任务集（待定义，≥20 条）**
 
 示例：
-- 「帮我看看青木遥现在到哪一步了」
-- 「给青木遥发测试题，附件是 test.pdf」
-- 「把青木遥的状态改成测试通过」
-- 「生成宋赛楠的合同」
-- 「婉拒刘启航」
+- 「帮我看看测试候选人A现在到哪一步了」
+- 「给测试候选人A发测试题，附件是 test.pdf」
+- 「把测试候选人A的状态改成测试通过」
+- 「生成测试候选人B的合同」
+- 「婉拒测试候选人C」
 
 ---
 
@@ -270,7 +270,7 @@ git log --oneline
   - resume 完成后更新该行 status=decided
   - VM 触发时说「继续李全鸿 record_id=recXXX」→ 我先查流程日志有无 status=waiting 行，有则直接 resume
   - 触发语：「有哪些候选人在等我决策」→ 查流程日志表 status=waiting 的行列出来
-  - **设计原则**：复用已有流程日志表（tblVQvjpJw9CO0kU），零新增字段，与原始 Agent 设计完全对齐
+  - **设计原则**：复用配置中的流程日志表，零新增字段，与原始 Agent 设计完全对齐
   - **原始设计基础**：流程日志表本就记录每步输入输出，VM 触发时提供 record_id，状态从飞书读不靠上下文
 
 - [x] **SKILL.md 补充「继续XXX」「有哪些在等我」触发语**

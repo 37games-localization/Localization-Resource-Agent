@@ -10,7 +10,7 @@ Agent 行动可视化 + Human Decision 暂停-恢复机制
   - checkpoint()  : Human Decision 节点，Agent 在此暂停，等待人的指令
   - resume()      : 人给出决策后，从 checkpoint 恢复继续执行
 
-飞书日志表字段（流程日志 tblVQvjpJw9CO0kU）：
+飞书日志表字段（流程日志表由 config.local.yaml 或字段映射提供）：
   run_id / step_name / step_type / input_summary / output_summary /
   status / decision / created_at / candidate_name
 """
@@ -137,8 +137,8 @@ class WorkflowEngine:
     工作流执行引擎
 
     用法：
-        engine = WorkflowEngine(candidate_name="青木遥")
-        with engine.step("分析简历", input="青木遥 PDF") as s:
+        engine = WorkflowEngine(candidate_name="测试候选人A")
+        with engine.step("分析简历", input="测试候选人A PDF") as s:
             result = do_analysis()
             s.finish(output=f"总分 {result['score']}")
 
@@ -174,10 +174,10 @@ class WorkflowEngine:
             cfg = load_config()
             lark = get_lark(cfg)
             self._lark_base   = lark.get("base_token", "")
-            self._lark_log_tbl= lark.get("log_table_id", "tblVQvjpJw9CO0kU")
+            self._lark_log_tbl= lark.get("log_table_id", "")
         except Exception:
             self._lark_base   = ""
-            self._lark_log_tbl= "tblVQvjpJw9CO0kU"
+            self._lark_log_tbl= ""
         self._apply_workflow_table_mapping()
 
         self._print_header()
@@ -310,10 +310,10 @@ class WorkflowEngine:
             cfg = load_config()
             lark = get_lark(cfg)
             self._lark_base = lark.get("base_token", "")
-            self._lark_log_tbl = lark.get("log_table_id", "tblVQvjpJw9CO0kU")
+            self._lark_log_tbl = lark.get("log_table_id", "")
         except Exception:
             self._lark_base = ""
-            self._lark_log_tbl = "tblVQvjpJw9CO0kU"
+            self._lark_log_tbl = ""
         self._apply_workflow_table_mapping()
 
     def _apply_workflow_table_mapping(self):
@@ -749,7 +749,7 @@ if __name__ == "__main__":
         time.sleep(0.2)
         s.finish(output="建议进入测试环节，游戏经验较丰富")
 
-    engine.trace("写回飞书", input_summary="recABC123", output_summary="✅ 写入成功")
+    engine.trace("写回飞书", input_summary="<record_id>", output_summary="✅ 写入成功")
 
     engine.summary()
     print("✅ 自检通过")

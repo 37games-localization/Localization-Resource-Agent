@@ -10,7 +10,7 @@ parse_resumes.py
 用法：
     python3 scripts/parse_resumes.py                    # 全量（跳过已解析）
     python3 scripts/parse_resumes.py --force            # 全量强制重跑
-    python3 scripts/parse_resumes.py --name "Kai Wichmann"
+    python3 scripts/parse_resumes.py --name "测试候选人A"
     python3 scripts/parse_resumes.py --record-id recXXX
     python3 scripts/parse_resumes.py --dry-run          # 只打印，不写飞书
 """

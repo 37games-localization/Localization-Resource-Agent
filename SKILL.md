@@ -154,17 +154,17 @@ python3 scripts/regression_report.py
 python3 scripts/parse_resumes.py
 
 # 指定候选人解析
-python3 scripts/parse_resumes.py --name "Kai Wichmann"
+python3 scripts/parse_resumes.py --name "测试候选人A"
 
 # 全量重算评分
 python3 scripts/rescore_and_write.py
 
 # 指定候选人评分
-python3 scripts/rescore_and_write.py --name "青木遥"
+python3 scripts/rescore_and_write.py --name "测试候选人A"
 
 # 先预览再执行（所有脚本都支持 --dry-run）
-python3 scripts/generate_contract.py --name "宋赛楠" --dry-run
-python3 scripts/generate_contract.py --name "宋赛楠" --send
+python3 scripts/generate_contract.py --name "测试候选人B" --dry-run
+python3 scripts/generate_contract.py --name "测试候选人B" --send
 ```
 
 ## v2 工作流可视化版
@@ -187,16 +187,16 @@ python3 scripts/generate_contract.py --name "宋赛楠" --send
 
 ```bash
 # 查看候选人状态
-python3 scripts/workflow_runner.py status --name "青木遥"
+python3 scripts/workflow_runner.py status --name "测试候选人A"
 
 # 自动判断下一步并执行
-python3 scripts/workflow_runner.py next --name "青木遥"
-python3 scripts/workflow_runner.py next --name "青木遥" --file ~/Downloads/test.pdf
+python3 scripts/workflow_runner.py next --name "测试候选人A"
+python3 scripts/workflow_runner.py next --name "测试候选人A" --file ~/Downloads/test.pdf
 
 # 手动指定某一步
-python3 scripts/workflow_runner.py score --name "青木遥"
-python3 scripts/workflow_runner.py test-email --name "青木遥" --file ~/test.pdf
-python3 scripts/workflow_runner.py contract --name "青木遥"
+python3 scripts/workflow_runner.py score --name "测试候选人A"
+python3 scripts/workflow_runner.py test-email --name "测试候选人A" --file ~/test.pdf
+python3 scripts/workflow_runner.py contract --name "测试候选人A"
 
 # 恢复 dialog checkpoint
 python3 scripts/workflow_runner.py resume --token ckpt-xxx --decision "写入"
@@ -388,9 +388,9 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 
 | 资源 | 用途 | 影响脚本 |
 |------|------|----------|
-| 合同信息收集表 `tblePA7PmmYlS936` | 读取乙方姓名/证件/银行信息 → 填入合同变量 | `generate_contract.py` `field_mapping.py` |
-| 合同模板表 `tblAGv4MYDGtiZ5Z` | 下载合同模板 docx + 读取所需变量 | `generate_contract.py` |
-| 简历收集表 `tbll1fWOund3PSgd` | 解析评分数据读写 | `parse_resumes.py` `evaluate_resumes.py` |
+| 合同信息收集表 `<contract_table_id>` | 读取乙方姓名/证件/银行信息 → 填入合同变量 | `generate_contract.py` `field_mapping.py` |
+| 合同模板表 `<template_table_id>` | 下载合同模板 docx + 读取所需变量 | `generate_contract.py` |
+| 简历收集表 `<resume_table_id>` | 解析评分数据读写 | `parse_resumes.py` `evaluate_resumes.py` |
 
 ### 变更 SOP（Agent 必须遵守）
 

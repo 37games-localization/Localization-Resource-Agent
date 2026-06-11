@@ -109,7 +109,7 @@ def validate_config(cfg: dict) -> list[str]:
     issues = []
 
     smtp = get_smtp(cfg)
-    if not smtp.get("user") or smtp.get("user") == "vm@company.com":
+    if not smtp.get("user") or smtp.get("user") == "your-email@example.com":
         issues.append("smtp.user 未配置（当前是占位符）")
     if not smtp.get("password"):
         issues.append("smtp.password 未填写")

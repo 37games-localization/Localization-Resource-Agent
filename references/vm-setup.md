@@ -85,7 +85,7 @@ python3 scripts/rescore_and_write.py --dry-run --limit 1
 安装完成后，直接在 OpenClaw 对话里说：
 
 - 「帮我解析新入库的简历」→ 自动跑 parse_resumes.py
-- 「给 Kai Wichmann 重跑评分」→ 自动跑 rescore_and_write.py
+- 「给 测试候选人A 重跑评分」→ 自动跑 rescore_and_write.py
 - 「全量重算评分」→ 全量重跑
 
 ## 单点优化

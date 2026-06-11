@@ -6,9 +6,9 @@ send_test_email.py 的 v2 版本：接入 WorkflowEngine，实现行动可视化
 
 用法（与原版完全兼容）：
     python3 scripts/send_test_email_v2.py --list
-    python3 scripts/send_test_email_v2.py --name "青木遥" --file ~/Downloads/test.pdf
-    python3 scripts/send_test_email_v2.py --name "青木遥" --file test.pdf --dry-run
-    python3 scripts/send_test_email_v2.py --name "青木遥" --file test.pdf --yes
+    python3 scripts/send_test_email_v2.py --name "测试候选人A" --file ~/Downloads/test.pdf
+    python3 scripts/send_test_email_v2.py --name "测试候选人A" --file test.pdf --dry-run
+    python3 scripts/send_test_email_v2.py --name "测试候选人A" --file test.pdf --yes
 """
 
 import sys, re, json, argparse, time

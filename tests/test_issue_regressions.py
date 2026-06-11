@@ -40,13 +40,13 @@ class LarkRecordNormalizeTest(unittest.TestCase):
             "fields": ["姓名", "招募状态"],
             "field_id_list": ["fld_name", "fld_status"],
             "record_id_list": ["rec1"],
-            "data": [["青木遥", "📋 新投递"]],
+            "data": [["测试候选人A", "📋 新投递"]],
         }
 
         records = normalize_record_list_data(data)
 
-        self.assertEqual(records[0]["fields"]["姓名"], "青木遥")
-        self.assertEqual(records[0]["fields"]["fld_name"], "青木遥")
+        self.assertEqual(records[0]["fields"]["姓名"], "测试候选人A")
+        self.assertEqual(records[0]["fields"]["fld_name"], "测试候选人A")
         self.assertEqual(records[0]["fields"]["招募状态"], "📋 新投递")
         self.assertEqual(records[0]["fields"]["fld_status"], "📋 新投递")
 
@@ -197,7 +197,7 @@ class ProductionGuardrailTest(unittest.TestCase):
 class BadcaseProtocolTest(unittest.TestCase):
     def test_snapshot_redacts_sensitive_agent_run_fields(self):
         snapshot = build_snapshot(
-            record_id="recSensitive",
+            record_id="record_test_sensitive",
             salt="unit-test",
             current_status="🔍 初筛中",
             expected_result="应该进入人工复核",

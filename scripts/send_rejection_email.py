@@ -6,10 +6,10 @@ send_rejection_email.py
 生成邮件预览 → VM 确认 → 发送（防误操作）
 
 用法：
-    python3 scripts/send_rejection_email.py --name "刘启航"
+    python3 scripts/send_rejection_email.py --name "测试候选人C"
     python3 scripts/send_rejection_email.py --record-id recXXX
-    python3 scripts/send_rejection_email.py --name "刘启航" --dry-run
-    python3 scripts/send_rejection_email.py --name "刘启航" --yes
+    python3 scripts/send_rejection_email.py --name "测试候选人C" --dry-run
+    python3 scripts/send_rejection_email.py --name "测试候选人C" --yes
 """
 
 import sys, re, json, argparse, subprocess

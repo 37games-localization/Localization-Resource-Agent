@@ -9,8 +9,8 @@ run_dialog.py
 
 用法：
     python3 scripts/run_dialog.py score --name "李全鸿"
-    python3 scripts/run_dialog.py test-email --name "青木遥" --file ~/test.pdf
-    python3 scripts/run_dialog.py contract --name "宋赛楠"
+    python3 scripts/run_dialog.py test-email --name "测试候选人A" --file ~/test.pdf
+    python3 scripts/run_dialog.py contract --name "测试候选人B"
     python3 scripts/run_dialog.py resume --token ckpt-xxx --decision "写入"
 
 输出：纯 JSON（stdout），AI 解析后转成自然语言给用户。
@@ -545,8 +545,8 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="""
 示例：
   score       python3 scripts/run_dialog.py score --name "李全鸿"
-  test-email  python3 scripts/run_dialog.py test-email --name "青木遥" --file ~/test.pdf
-  contract    python3 scripts/run_dialog.py contract --name "宋赛楠"
+  test-email  python3 scripts/run_dialog.py test-email --name "测试候选人A" --file ~/test.pdf
+  contract    python3 scripts/run_dialog.py contract --name "测试候选人B"
   resume      python3 scripts/run_dialog.py resume --token ckpt-xxx --decision "写入"
         """,
     )

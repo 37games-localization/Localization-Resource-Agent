@@ -6,13 +6,13 @@ VM 收到资源商签字合同后，将文件路径/URL 告知 agent，执行核
 
 用法：
     # 指定本地文件路径
-    python3 scripts/check_signed_contract.py --name "宋赛楠" --file ~/Downloads/contract.pdf
+    python3 scripts/check_signed_contract.py --name "测试候选人B" --file ~/Downloads/contract.pdf
 
     # 指定多个文件（如合同+签名页分开）
-    python3 scripts/check_signed_contract.py --name "宋赛楠" --file a.pdf --file b.jpg
+    python3 scripts/check_signed_contract.py --name "测试候选人B" --file a.pdf --file b.jpg
 
     # 只核查不更新飞书
-    python3 scripts/check_signed_contract.py --name "宋赛楠" --file contract.pdf --dry-run
+    python3 scripts/check_signed_contract.py --name "测试候选人B" --file contract.pdf --dry-run
 
     # 跳过确认直接更新
 

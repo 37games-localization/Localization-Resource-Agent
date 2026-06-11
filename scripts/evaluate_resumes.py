@@ -10,7 +10,7 @@ LLM 输出结构化 JSON，直接写回飞书候选人表。
 用法：
     python3 scripts/evaluate_resumes.py                     # 全量（跳过已评分）
     python3 scripts/evaluate_resumes.py --force             # 全量强制重跑
-    python3 scripts/evaluate_resumes.py --name "Kai Wichmann"
+    python3 scripts/evaluate_resumes.py --name "测试候选人A"
     python3 scripts/evaluate_resumes.py --record-id recXXX
     python3 scripts/evaluate_resumes.py --dry-run           # 只打印，不写飞书
     python3 scripts/evaluate_resumes.py --limit 5           # 只跑前5条

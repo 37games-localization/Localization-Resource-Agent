@@ -11,10 +11,10 @@
 smtp:
   host: "smtp.example.com"            # 企业邮箱 SMTP 地址
   port: 465
-  user: "your-email@37.com"
+  user: "your-email@example.com"
   password: ""                   # 邮箱密码或授权码；不要提交真实值
   sender_name: "Localization Team"
-  sender_email: "your-email@37.com"
+  sender_email: "your-email@example.com"
   ssl: true
 
 lark:

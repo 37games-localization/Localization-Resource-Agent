@@ -30,12 +30,12 @@
 
 | 节点 | 验证对象 | 验证方式 | 证据/结果 | 当前结论 |
 |---|---|---|---|---|
-| 评分重算 | 青木遥 `recvk97CnpWlid` | `rescore_and_write.py --record-id ... --dry-run` | 总分 100，S 档，有效简历=是；已写 `workflow_log` | 通过 dry-run |
-| 测试题邮件 | 青木遥 + 中译英测试题 | dry-run + TEST_MODE 真发送 | 测试邮箱收到；Lark 状态曾写回 `📤 测试中`；已写 `workflow_log` | 通过 TEST_MODE |
-| 状态推进 | 青木遥 | 真实 Lark 写回 | `📤 测试中` -> `✅ 测试通过` | 通过真实写回 |
-| 合同生成 | 青木遥合同信息 | dry-run + 真实 docx 生成 | 12 个变量全部填充；证件图片插入；输出 docx 已生成；已写 `workflow_log` | 通过 |
-| 婉拒邮件 | 刘启航 | dry-run + TEST_MODE 真发送 | 测试邮箱收到 | 通过 TEST_MODE |
-| 签字合同核查 | 青木遥 signed PDF | dry-run + PDF 文本 diff | 签名页可提取；字段 diff 失败，原因是测试 PDF 与 Lark 假数据不一致；已写 failed 日志 | 能力验证通过，样本不一致 |
+| 评分重算 | 测试候选人A `<candidate_record_id>` | `rescore_and_write.py --record-id ... --dry-run` | 总分 100，S 档，有效简历=是；已写 `workflow_log` | 通过 dry-run |
+| 测试题邮件 | 测试候选人A + 中译英测试题 | dry-run + TEST_MODE 真发送 | 测试邮箱收到；Lark 状态曾写回 `📤 测试中`；已写 `workflow_log` | 通过 TEST_MODE |
+| 状态推进 | 测试候选人A | 真实 Lark 写回 | `📤 测试中` -> `✅ 测试通过` | 通过真实写回 |
+| 合同生成 | 测试候选人A合同信息 | dry-run + 真实 docx 生成 | 12 个变量全部填充；证件图片插入；输出 docx 已生成；已写 `workflow_log` | 通过 |
+| 婉拒邮件 | 测试候选人C | dry-run + TEST_MODE 真发送 | 测试邮箱收到 | 通过 TEST_MODE |
+| 签字合同核查 | 测试候选人A signed PDF | dry-run + PDF 文本 diff | 签名页可提取；字段 diff 失败，原因是测试 PDF 与 Lark 假数据不一致；已写 failed 日志 | 能力验证通过，样本不一致 |
 | schema 校验 | candidate / workflow_log / contract_info | `schema_validator.py --table all` | 0 缺失、0 疑似匹配、0 类型不匹配；映射已刷新 | 通过 |
 | 集成验收 | v2 入口和包装层 | `integration_readiness.py` | PASS | 通过 |
 | 评分规则 | 25 个规则用例 | `tests/run_tests.py` | 25/25 PASS | 通过 |

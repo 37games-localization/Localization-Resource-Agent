@@ -19,10 +19,10 @@
 
 | 节点 | 验收方式 | 当前结论 |
 |---|---|---|
-| 评分重算 | 青木遥真实 record_id dry-run | 通过 |
+| 评分重算 | 测试候选人A真实 record_id dry-run | 通过 |
 | 测试题邮件 | dry-run + TEST_MODE 真发送 + 用户收件确认 | 通过 |
 | 合同生成 | dry-run + 真实 docx 生成 | 通过 |
-| 状态推进 | 青木遥真实 Lark 写回 | 通过 |
+| 状态推进 | 测试候选人A真实 Lark 写回 | 通过 |
 | 婉拒邮件 | dry-run + TEST_MODE 真发送 + 用户收件确认 | 通过 |
 | 签字合同核查 | signed PDF dry-run + 自动字段 diff | 通过能力验证；样例合同字段不一致，因此不更新状态 |
 | Lark schema/mapping | `schema_validator.py --table all` | 通过 |
@@ -68,7 +68,7 @@ Lark 写回：
 VM 触发：
 
 ```text
-给青木遥重跑评分
+给测试候选人A重跑评分
 ```
 
 推荐命令：
@@ -101,7 +101,7 @@ python3 scripts/rescore_and_write.py --record-id <candidate_record_id> --dry-run
 VM 触发：
 
 ```text
-给青木遥发测试题，附件是 /path/to/test.xlsx
+给测试候选人A发测试题，附件是 /path/to/test.xlsx
 ```
 
 推荐命令：
@@ -137,7 +137,7 @@ python3 scripts/send_test_email.py --record-id <candidate_record_id> --file <tes
 VM 触发：
 
 ```text
-把青木遥状态改成测试通过
+把测试候选人A状态改成测试通过
 ```
 
 推荐命令：
@@ -169,14 +169,14 @@ python3 scripts/update_status.py --record-id <candidate_record_id> --status "✅
 VM 触发：
 
 ```text
-给青木遥生成合同
+给测试候选人A生成合同
 ```
 
 推荐命令：
 
 ```bash
-python3 scripts/generate_contract.py --name "青木遥" --dry-run
-python3 scripts/generate_contract.py --name "青木遥" --yes
+python3 scripts/generate_contract.py --name "测试候选人A" --dry-run
+python3 scripts/generate_contract.py --name "测试候选人A" --yes
 ```
 
 输入：
@@ -207,13 +207,13 @@ python3 scripts/generate_contract.py --name "青木遥" --yes
 VM 触发：
 
 ```text
-青木遥合同已签字，文件是 /path/to/signed.pdf
+测试候选人A合同已签字，文件是 /path/to/signed.pdf
 ```
 
 推荐命令：
 
 ```bash
-python3 scripts/check_signed_contract.py --name "青木遥" --file <signed_pdf> --dry-run
+python3 scripts/check_signed_contract.py --name "测试候选人A" --file <signed_pdf> --dry-run
 ```
 
 输入：
@@ -243,7 +243,7 @@ python3 scripts/check_signed_contract.py --name "青木遥" --file <signed_pdf> 
 VM 触发：
 
 ```text
-给刘启航发婉拒邮件
+给测试候选人C发婉拒邮件
 ```
 
 推荐命令：

@@ -67,7 +67,7 @@ def resolve_table_from_config(table_key: str) -> tuple[str, str]:
     if table_key == "workflow_log" and not table_id:
         mapped_base, mapped_table = _table_ref_from_mapping(table_key)
         base_token = mapped_base or base_token
-        table_id = mapped_table or "tblVQvjpJw9CO0kU"
+        table_id = mapped_table or table_id
 
     if not base_token and table_key == "contract_info":
         base_token = get_lark(cfg).get("base_token", "")

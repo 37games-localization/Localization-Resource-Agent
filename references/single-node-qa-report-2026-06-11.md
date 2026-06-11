@@ -2,21 +2,21 @@
 
 ## 结论
 
-当前版本已完成一轮基于测试候选人「青木遥」的单节点 QA。配置门禁、Lark 表结构、评分引擎、评分重算、测试题邮件预览、合同生成预览、签字合同核查、状态推进预览、婉拒邮件预览、Badcase 导出预览均已验证。
+当前版本已完成一轮基于测试候选人「测试候选人A」的单节点 QA。配置门禁、Lark 表结构、评分引擎、评分重算、测试题邮件预览、合同生成预览、签字合同核查、状态推进预览、婉拒邮件预览、Badcase 导出预览均已验证。
 
 这轮 QA 证明：现有 Agent 的单点能力仍可独立调用；v2 可视化/包装层没有接管核心业务判断；当前主要剩余工作是 VM 真实生产表/真实候选人下的验收，而不是重构 Agent 主流程。
 
 ## 测试环境
 
-- Skill 目录：`/Users/dataozi/.agents/skills/loc-resume-screening`
+- Skill 目录：`<skill-dir>`
 - 分支：`v2-workflow-viz`
 - 配置文件：`config.local.yaml`
 - 运行模式：TEST_MODE
-- 测试收件箱：`demo@example.com`
-- 简历主表测试候选人：青木遥，`recvk97CnpWlid`
-- 合同信息表测试候选人：青木遥，`recvkBmaC9IxjW`
-- 测试题附件：`/Users/dataozi/Downloads/中译英-游戏翻译测试稿_test.xlsx`
-- 签回合同：`/Users/dataozi/Downloads/翻译委托框架协议_LOC Demo_青木遥_signed.pdf`
+- 测试收件箱：`test-inbox@example.com`
+- 简历主表测试候选人：测试候选人A，`<candidate_record_id>`
+- 合同信息表测试候选人：测试候选人A，`<contract_record_id>`
+- 测试题附件：`<local-test-file.xlsx>`
+- 签回合同：`<signed-contract.pdf>`
 
 ## 基础门禁
 
@@ -31,12 +31,12 @@
 
 | 节点 | 命令模式 | 结果 | 关键输出 |
 | --- | --- | --- | --- |
-| 评分重算 | `--record-id recvk97CnpWlid --dry-run` | PASS | 青木遥总分 100，初始评级 S，有效简历=是 |
-| 测试题邮件 | `--record-id recvk97CnpWlid --file ... --dry-run --allow-language-mismatch` | PASS | 成功解析 Excel 附件 40 条有效行，生成邮件预览，TEST_MODE 收件箱正确 |
-| 合同生成 | `--name 青木遥 --dry-run` | PASS | 成功匹配合同信息表记录，推荐个人外币个人账户模板，12 个变量全部填充 |
-| 签字合同核查 | `--name 青木遥 --file ... --dry-run` | PASS | PDF 格式正常，关键字段均能在签回文件中匹配，输出 VM 人工确认清单 |
-| 状态推进 | `--record-id recvk97CnpWlid --status "📋 简历待筛选" --dry-run` | PASS | 能识别当前旧状态「📋 新投递」并预览目标状态，不写回飞书 |
-| 婉拒邮件 | `--record-id recvk97CnpWlid --dry-run` | PASS | 非已拒绝状态下给出风险提示并生成邮件预览，不再要求非交互确认 |
+| 评分重算 | `--record-id <candidate_record_id> --dry-run` | PASS | 测试候选人A总分 100，初始评级 S，有效简历=是 |
+| 测试题邮件 | `--record-id <candidate_record_id> --file ... --dry-run --allow-language-mismatch` | PASS | 成功解析 Excel 附件 40 条有效行，生成邮件预览，TEST_MODE 收件箱正确 |
+| 合同生成 | `--name 测试候选人A --dry-run` | PASS | 成功匹配合同信息表记录，推荐个人外币个人账户模板，12 个变量全部填充 |
+| 签字合同核查 | `--name 测试候选人A --file ... --dry-run` | PASS | PDF 格式正常，关键字段均能在签回文件中匹配，输出 VM 人工确认清单 |
+| 状态推进 | `--record-id <candidate_record_id> --status "📋 简历待筛选" --dry-run` | PASS | 能识别当前旧状态「📋 新投递」并预览目标状态，不写回飞书 |
+| 婉拒邮件 | `--record-id <candidate_record_id> --dry-run` | PASS | 非已拒绝状态下给出风险提示并生成邮件预览，不再要求非交互确认 |
 | Badcase 导出 | `--dry-run` | PASS | 当前没有待处理 badcase，脚本正常退出 |
 
 ## 本轮发现并修复的问题

@@ -17,25 +17,12 @@
 | 简历解析评分 | 「帮我解析今天新来的简历」 |
 | 发测试题邮件 | 「给 XXX 发测试题，附件在桌面」 |
 | 生成合同 | 「XXX 合同信息收集好了，帮我生成合同」|
-| 发送合同邮件 | 「生成完发给她」或 `--draft` 保存草稿自己发 |
+| 合同邮件草稿 | 「帮我生成合同邮件草稿」 |
 | 核查签字合同 | 「XXX 签字版回来了，帮我核查」 |
 | 发婉拒邮件 | 「给 XXX 发婉拒」 |
 | 状态推进 | 「XXX 财务审批通过了，更新状态」 |
 | 查看候选人列表 | 「列出所有初筛通过的候选人」 |
 | **标记 Badcase** | 「把这个标成 badcase，应该进人工复核」或直接在飞书打标 |
-
----
-
-## 当前稳定点
-
-| 项目 | 状态 |
-|------|------|
-| 远端分支 | `v2-workflow-viz` |
-| 当前稳定提交 | `1bb2a74` |
-| 上一个 QA tag | `v0.1-single-node-qa` |
-| 回滚方式 | Git 保留完整提交历史，可用 `git revert` 回退合并提交，或拉回指定 tag/commit |
-
-> 建议：合并 main 前后保留 tag。生产端如发现阻断问题，优先用 `git revert` 撤销合并，不破坏协作历史。
 
 ---
 
@@ -85,10 +72,9 @@ Badcase 上报必须走统一协议：
 
 ## 快速安装
 
-### 方式一：Git 拉取（推荐）
+### Git 拉取（推荐）
 
 ```bash
-# 克隆仓库到 skill 目录
 git clone https://<your-token>@github.com/<org-or-user>/<repo>.git \
   ~/.agents/skills/loc-resume-screening
 
@@ -98,40 +84,36 @@ git checkout main
 
 `<your-token>` 找 penny 获取（只读权限）。
 
-### 方式二：手动解压
+也可以下载 `.skill` 文件后解压到 `~/.agents/skills/loc-resume-screening/`。
 
-下载 `.skill` 文件后解压到 `~/.agents/skills/loc-resume-screening/`。
-
-### Windows 用户
-
-建议先安装 WSL2，在 Linux 环境下运行，避免路径和依赖兼容问题。
+Windows 用户如果不确定怎么装，直接让 Agent 按 onboarding 指引带着配置，不需要先理解 WSL / 依赖 / 路径差异。
 
 ---
 
 ## 安装后第一步
 
-```bash
-cd ~/.agents/skills/loc-resume-screening
-pip3 install pymupdf anthropic pyyaml python-docx
-lark-cli config bind --source openclaw --identity bot-only
+打开 OpenClaw / Codex，对资源管理 Agent 说：
+
+```text
+帮我完成资源管理 Agent 初始化配置
 ```
 
-然后复制配置模板，生成本机配置文件：
+Agent 会逐步引导 VM 完成：
 
-```bash
-cp config.example.yaml config.local.yaml
-```
+- 安装依赖。
+- 绑定飞书机器人。
+- 生成本机配置文件。
+- 填写 Lark 表、SMTP、LLM key、输出路径等本机配置。
+- 识别飞书表头，检查缺列/多列/字段改名。
+- VM 确认后自动补齐允许创建的辅助列，并完成内部校验。
 
-编辑 `config.local.yaml`，填写你自己的：
-- 企业邮箱（SMTP）
-- 飞书 base_token 和 table_id
-- 合同输出路径
-
-填完让 Agent 说「帮我验证资源管理配置」，通过后正式使用。
+配置通过后，VM 日常只需要用自然语言调用，例如「看下 XXX 的简历」「给 XXX 准备合同」「把这个标成 badcase」。技术命令和排障步骤保留在 onboarding 文档里，不作为 VM 的默认入口。
 
 详细引导见 [`references/onboarding.md`](references/onboarding.md)
 
 v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-11.md`](references/v2.4-release-notes-2026-06-11.md)
+
+生产表维护清单见 [`HANDOVER.md`](HANDOVER.md#vm-日常维护的-lark-表格)
 
 ---
 
@@ -256,7 +238,7 @@ git revert <commit_sha>
 git checkout v0.1-single-node-qa
 ```
 
-生产端如果发现阻断问题，请先开 GitHub issue，并标明当前 commit、候选人 record_id、执行命令和预期结果。
+生产端如果发现阻断问题，请先让 Agent 导出脱敏 Badcase snapshot，再由项目负责人按统一模板开 GitHub issue。不要在 issue 或交接文档中暴露真实 base token、table id、邮箱、候选人姓名、本地路径等敏感信息。
 
 ---
 
