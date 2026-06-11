@@ -2,14 +2,34 @@
 
 ## 飞书 Base 信息
 
-| 项目 | 值 |
+这里不再保存真实 token / table-id。VM 更换表或部署新环境时，应先在本机 `config.local.yaml` 中填写真实配置，再运行 `schema_validator.py` 做表头识别。
+
+| 项目 | 用途 | 填写位置 |
 |------|----|
-| Base URL | https://g4wt0dn9mss.sg.larksuite.com/base/JbkRbkGf6aAqfnsCDHHlJMjbg3b |
-| base-token | JbkRbkGf6aAqfnsCDHHlJMjbg3b |
-| 主数据表 table-id | tbll1fWOund3PSgd |
-| 飞书 App ID | cli_a9361aaf32619eed（bot 身份） |
+| 简历收集表 base-token | 读取候选人、简历、评分、状态 | `lark.base_token` |
+| 简历收集表 table-id | 主数据表 | `lark.resume_table_id` |
+| 合同信息表 base-token | 读取收款信息、证件、签回合同 | `lark.contract_base_token` |
+| 合同信息表 table-id | 合同信息收集表 | `lark.contract_table_id` |
+| 合同模板表 base-token | 读取合同模板 | `lark.template_base_token` |
+| 合同模板表 table-id | 合同模板表 | `lark.template_table_id` |
+| 飞书 App ID | bot 绑定用，找项目维护人获取 | 不写入文档 |
+
+## LLM API Key
+
+简历解析需要 LLM API Key。请在本机 `config.local.yaml` 中填写：
+
+```yaml
+llm:
+  base_url: "https://ai-proxy.37wan.com/anthropic"
+  model: "claude-sonnet-4-5-20250929"
+  api_key: "你的apiKey"
+```
+
+也可以设置环境变量 `LOC_LLM_API_KEY`。skill 不会自动读取 OpenClaw provider 或 `openclaw.json`，避免静默消耗 OpenClaw 月度额度。
 
 ## 关键字段 ID
+
+当前 Field ID 仅是现有测试表的参考。实际运行优先读取 `config/lark-field-mapping.yaml`；VM 更换 Lark 表后，先运行 `python3 scripts/schema_validator.py --table all` 做只读识别，确认无误后再用 `--apply` 刷新新映射。
 
 ### 输入字段（VM 填写）
 | 字段名 | Field ID | 类型 |
@@ -48,9 +68,9 @@
 
 | 文件 | 路径 |
 |------|------|
-| 引擎主文件 | `/Users/dataozi/Downloads/resource-management-scripts/scripts/resume_screening_engine_v2.py` |
-| 价格规则 | `/Users/dataozi/.openclaw/workspace/scripts/pricing_rules.json` |
-| PDF 缓存目录 | `/tmp/rescore_pdf_cache/` |
+| 引擎主文件 | `scripts/resume_screening_engine_v2.py` |
+| 评分规则与价格范围 | `config/resume_screening_rules_v2.json` |
+| PDF 缓存目录 | `~/.loc-resume-cache/` |
 
 ## 评分规则摘要（V2.1）
 
@@ -64,7 +84,7 @@
 - 有议价空间：价格×0.9（有一些）或×0.7（较大）
 - 满分标准：调整后价格 ≤ 语言对目标价
 - 超出上限（hard_limit）：0分
-- 价格规则按语言对配置，见 `pricing_rules.json`
+- 价格规则按语言对配置，见 `config/resume_screening_rules_v2.json` 的 `price_rules`
 
 ### 资历评分（50分）
 **优先级**：LLM 解析字段 > 正则提取 > 年限估算 > 项目数估算

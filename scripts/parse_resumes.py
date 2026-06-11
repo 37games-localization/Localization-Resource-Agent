@@ -30,6 +30,8 @@ import fitz  # pymupdf
 # ── 配置（从 config.yaml 读取） ───────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_lark, get_llm_api_key, is_test_mode
+from field_resolver import field_id_or
+from lark_cli_utils import normalize_record_list_data
 
 _CFG       = load_config()
 _LARK      = get_lark(_CFG)
@@ -38,16 +40,20 @@ TABLE_ID   = _LARK.get("resume_table_id", "")
 PDF_CACHE  = Path.home() / ".loc-resume-cache"
 PDF_CACHE.mkdir(exist_ok=True)
 
-# 飞书字段 ID（固定，不会变）
+# 飞书字段 ID：优先使用 schema_validator.py 生成的映射；缺映射时回退旧生产表 ID。
 FIELD_IDS = {
-    "姓名":         "fldSAfsOJf",
-    "简历":         "fld7W0W7e2",
-    "解析字数":     "flduKRhgTV",
-    "解析年限":     "flde0kTB3Z",
-    "解析项目数":   "fldfpo5X1f",
-    "解析知名实体": "fld3cWjCaA",
-    "简历解析时间": "fldh8Ebrxl",
+    "姓名":         field_id_or("candidate", "candidate.name", "fldSAfsOJf"),
+    "简历":         field_id_or("candidate", "candidate.resume", "fld7W0W7e2"),
+    "解析字数":     field_id_or("candidate", "candidate.parsed_word_count", "flduKRhgTV"),
+    "解析年限":     field_id_or("candidate", "candidate.parsed_years", "flde0kTB3Z"),
+    "解析项目数":   field_id_or("candidate", "candidate.parsed_project_count", "fldfpo5X1f"),
+    "解析知名实体": field_id_or("candidate", "candidate.parsed_entities", "fld3cWjCaA"),
+    "简历解析时间": field_id_or("candidate", "candidate.resume_parsed_at", "fldh8Ebrxl"),
+    "招募状态":     field_id_or("candidate", "candidate.status", "fldfp6Pn7l"),
 }
+
+PARSE_DONE_STATUS = "🔍 初筛中"
+PARSE_STATUS_FROM = {"", "📋 新投递", "📋 简历待筛选"}
 
 LLM_MODEL  = _CFG.get("llm", {}).get("model", "claude-sonnet-4-5-20250929")
 LLM_PROMPT = """你是一个专业的游戏本地化简历解析助手。
@@ -107,21 +113,32 @@ def fetch_all_records() -> list[dict]:
 
         resp = lark_cli(*args)
         db = resp.get("data", {})
-        field_names = db.get("fields", [])
-        record_ids  = db.get("record_id_list", [])
-        rows        = db.get("data", [])
+        page_records = normalize_record_list_data(db)
+        records.extend(page_records)
 
-        for rid, row in zip(record_ids, rows):
-            fields = dict(zip(field_names, row))
-            records.append({"record_id": rid, "fields": fields})
-
-        print(f"  第{page}页：{len(record_ids)} 条，累计 {len(records)} 条")
+        print(f"  第{page}页：{len(page_records)} 条，累计 {len(records)} 条")
 
         if not db.get("has_more"):
             break
         page_token = db.get("page_token")
 
     return records
+
+
+def extract_text(val) -> str:
+    if not val:
+        return ""
+    if isinstance(val, list):
+        parts = []
+        for item in val:
+            if isinstance(item, dict):
+                parts.append(item.get("text") or item.get("name") or "")
+            else:
+                parts.append(str(item))
+        text = " ".join(p for p in parts if p).strip()
+    else:
+        text = str(val).strip()
+    return re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
 
 
 def download_pdf(file_token: str) -> str:
@@ -150,11 +167,50 @@ def extract_pdf_text(pdf_path: str) -> str:
         return ""
 
 
-# OpenClaw 代理配置
-# apiKey 优先读环境变量 LOC_LLM_API_KEY，其次从 openclaw.json 自动读取
+# LLM 代理配置：apiKey 必须在 config.yaml 或 LOC_LLM_API_KEY 显式配置。
 _PROXY_BASE_URL = _CFG.get("llm", {}).get("base_url", "https://ai-proxy.37wan.com/anthropic")
 _LLM_MODEL_ID   = LLM_MODEL
 _PROXY_API_KEY  = get_llm_api_key(_CFG)
+_LLM_PROVIDER   = _CFG.get("llm", {}).get("provider", "anthropic")
+
+
+def _call_openai_compatible(prompt: str) -> str:
+    import ssl
+    import urllib.request
+    import urllib.error
+    try:
+        import certifi
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ssl_context = ssl.create_default_context()
+
+    base_url = _PROXY_BASE_URL.rstrip("/")
+    url = f"{base_url}/chat/completions"
+    payload = json.dumps(
+        {
+            "model": _LLM_MODEL_ID,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 512,
+            "temperature": 0,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {_PROXY_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60, context=ssl_context) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")[:300]
+        raise RuntimeError(f"OpenAI-compatible LLM HTTP {e.code}: {detail}") from e
+    return body["choices"][0]["message"]["content"].strip()
 
 
 def call_llm(text: str) -> dict | None:
@@ -162,17 +218,20 @@ def call_llm(text: str) -> dict | None:
     prompt = LLM_PROMPT.replace("{text}", text[:8000])  # 截断防超长
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(
-            base_url=_PROXY_BASE_URL,
-            api_key=_PROXY_API_KEY,
-        )
-        msg = client.messages.create(
-            model=_LLM_MODEL_ID,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        raw = msg.content[0].text.strip()
+        if _LLM_PROVIDER in {"deepseek", "openai_compatible"}:
+            raw = _call_openai_compatible(prompt)
+        else:
+            import anthropic
+            client = anthropic.Anthropic(
+                base_url=_PROXY_BASE_URL,
+                api_key=_PROXY_API_KEY,
+            )
+            msg = client.messages.create(
+                model=_LLM_MODEL_ID,
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw = msg.content[0].text.strip()
         # 提取 JSON
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:
@@ -183,7 +242,15 @@ def call_llm(text: str) -> dict | None:
     return None
 
 
-def write_parsed_fields(record_id: str, parsed: dict, dry_run: bool) -> bool:
+def next_status_after_parse(current_status: str) -> str | None:
+    """Return the standard next status after successful resume parsing."""
+    status = extract_text(current_status)
+    if status in PARSE_STATUS_FROM:
+        return PARSE_DONE_STATUS
+    return None
+
+
+def write_parsed_fields(record_id: str, parsed: dict, dry_run: bool, current_status: str = "") -> bool:
     """把解析结果写回飞书"""
     now_ms = int(time.time() * 1000)
 
@@ -194,9 +261,12 @@ def write_parsed_fields(record_id: str, parsed: dict, dry_run: bool) -> bool:
         FIELD_IDS["解析知名实体"]: parsed.get("notable_entities", "") or "",
         FIELD_IDS["简历解析时间"]: now_ms,
     }
+    next_status = next_status_after_parse(current_status)
+    if next_status:
+        values[FIELD_IDS["招募状态"]] = next_status
 
     if dry_run:
-        print(f"    [DRY-RUN] 写入: {json.dumps(values, ensure_ascii=False)[:120]}")
+        print(f"    [DRY-RUN] 写入: {json.dumps(values, ensure_ascii=False)[:160]}")
         return True
 
     resp = lark_cli(
@@ -231,14 +301,19 @@ def main():
     if args.record_id:
         records = [r for r in records if r["record_id"] == args.record_id]
     elif args.name:
-        records = [r for r in records if args.name in str(r["fields"].get("姓名", ""))]
+        records = [
+            r for r in records
+            if args.name in extract_text(
+                r["fields"].get("姓名") or r["fields"].get(FIELD_IDS["姓名"]) or ""
+            )
+        ]
 
     ok_count = err_count = skip_count = 0
 
     for i, rec in enumerate(records, 1):
         rid    = rec["record_id"]
         fields = rec["fields"]
-        name   = str(fields.get("姓名", rid))
+        name   = extract_text(fields.get("姓名") or fields.get(FIELD_IDS["姓名"]) or rid)
 
         print(f"[{i}/{len(records)}] {name}")
 
@@ -250,7 +325,7 @@ def main():
             continue
 
         # 取简历附件
-        resume = fields.get("简历") or []
+        resume = fields.get("简历") or fields.get(FIELD_IDS["简历"]) or []
         if not resume or not isinstance(resume, list):
             print(f"  ⚠️  无简历附件，跳过\n")
             skip_count += 1
@@ -295,9 +370,13 @@ def main():
               f"知名实体={parsed.get('notable_entities','')[:60]}")
 
         # 写回飞书
-        success = write_parsed_fields(rid, parsed, args.dry_run)
+        current_status = fields.get("招募状态") or fields.get(FIELD_IDS["招募状态"], "")
+        success = write_parsed_fields(rid, parsed, args.dry_run, current_status=current_status)
         if success:
             ok_count += 1
+            status_msg = next_status_after_parse(current_status)
+            if status_msg:
+                print(f"  招募状态 → {status_msg}")
             print(f"  {'[DRY-RUN] ' if args.dry_run else ''}写入成功\n")
         else:
             err_count += 1

@@ -30,9 +30,9 @@ resources:
   # ── 1. 合同信息收集表（VM 发给资源商填写） ──────────────────
   - id: form_contract_collect
     desc: 合同信息收集表（资源商填写银行/证件信息）
-    url: https://g4wt0dn9mss.sg.larksuite.com/share/base/form/shrlgF4lJe3AZUz7PY5XuQ8Ugfd
-    base_token: JbkRbkGf6aAqfnsCDHHlJMjbg3b
-    table_id: tblePA7PmmYlS936
+    url: "<由项目维护人提供>"
+    base_token: "<填写到 config.local.yaml:lark.contract_base_token>"
+    table_id: "<填写到 config.local.yaml:lark.contract_table_id>"
     used_by:
       - scripts/generate_contract.py   # 读取字段值 → 填入合同变量
       - scripts/field_mapping.py       # 字段 ID → 合同变量名的映射表
@@ -114,9 +114,9 @@ resources:
   # ── 2. 合同模板表（内部维护，存模板文件和所需变量） ──────────
   - id: contract_template_table
     desc: 合同模板汇总表（存 AI 标注版合同 + 所需变量 + 变量映射说明）
-    url: https://g4wt0dn9mss.sg.larksuite.com/wiki/TwThwRU8uiLS7vkD1xHldANGgAh?table=tblAGv4MYDGtiZ5Z&view=vewCHHYjNn
-    base_token: WtNAb5ylMa0zqpsjciclnorugWb
-    table_id: tblAGv4MYDGtiZ5Z
+    url: "<由项目维护人提供>"
+    base_token: "<填写到 config.local.yaml:lark.template_base_token>"
+    table_id: "<填写到 config.local.yaml:lark.template_table_id>"
     used_by:
       - scripts/generate_contract.py   # 读取模板文件（AI合同模版附件字段）
     critical_fields:
@@ -140,8 +140,8 @@ resources:
   # ── 3. 简历收集表（资源商提交简历） ────────────────────────
   - id: resume_table
     desc: 简历收集表（资源商提交简历 + 评分结果存储）
-    base_token: JbkRbkGf6aAqfnsCDHHlJMjbg3b
-    table_id: tbll1fWOund3PSgd
+    base_token: "<填写到 config.local.yaml:lark.base_token>"
+    table_id: "<填写到 config.local.yaml:lark.resume_table_id>"
     used_by:
       - scripts/parse_resumes.py
       - scripts/rescore_and_write.py
@@ -151,8 +151,8 @@ resources:
   # ── 4. 资源管理主表（入库后的资源商档案） ───────────────────
   - id: resource_master_table
     desc: 外部资源信息表（已入库资源商档案）
-    base_token: HekabpDDkaUzyCsjKpqlCEFJgQf
-    table_id: tblkYSN55qkj9Td4
+    base_token: "<由项目维护人提供，写入本机 config.local.yaml>"
+    table_id: "<由项目维护人提供，写入本机 config.local.yaml>"
     note: "入库操作写入此表；亦用于 badcase 收集"
     badcase_fields:
       - field_id: fldxTGrPF3
@@ -183,8 +183,8 @@ local_files:
   - path: scripts/field_mapping.py
     desc: "合同变量名 → 收集表 field_id 的映射字典（source of truth）"
     note: "收集表字段变更时，此文件需要同步更新"
-  - path: config.yaml
-    desc: "所有环境配置入口（base_token / smtp / 路径等）"
+  - path: config.local.yaml
+    desc: "本机真实配置入口（base_token / smtp / 路径等），不能提交或打包"
   - path: config/resume_screening_rules_v2.json
     desc: "评分规则配置"
   - path: contracts/templates/

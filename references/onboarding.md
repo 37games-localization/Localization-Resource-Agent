@@ -32,16 +32,24 @@ App ID 找 penny 获取（共用同一个 bot）。
 合同模板存储在**飞书合同模板汇总表**，脚本自动从飞书下载，**不需要在本地维护模板文件**。
 
 确认 bot 有权限访问以下两张飞书表（找 penny 确认）：
-- 合同模板表（base-token: 如实填入 `config.yaml` 中的 `lark.template_base_token`）
+- 合同模板表（base-token: 如实填入 `config.local.yaml` 中的 `lark.template_base_token`）
 - 合同信息收集表（base-token: `lark.contract_base_token`）
 
 ---
 
-## 第四步：填写 config.yaml
+## 第四步：生成并填写 config.local.yaml
 
-打开 skill 目录下的 `config.yaml`：
+先从模板生成本机配置：
+
+```bash
+cd ~/.agents/skills/loc-resume-screening
+cp config.example.yaml config.local.yaml
 ```
-~/.agents/skills/loc-resume-screening/config.yaml
+
+然后打开 skill 目录下的 `config.local.yaml`：
+
+```
+~/.agents/skills/loc-resume-screening/config.local.yaml
 ```
 
 按照以下说明逐项填写：
@@ -53,7 +61,7 @@ smtp:
   host: "smtp.exmail.qq.com"    # 你的企业邮箱 SMTP 地址
   port: 465
   user: "你的邮箱@公司域名.com"
-  password: "邮箱密码或授权码"
+  password: ""                   # 邮箱密码或授权码
   sender_name: "本地化团队"
 ```
 
@@ -67,19 +75,36 @@ smtp:
 ```yaml
 lark:
   # 简历收集表（评分数据主表）
-  base_token: "JbkRbkGf6aAqfnsCDHHlJMjbg3b"
-  resume_table_id: "tbll1fWOund3PSgd"
+  base_token: "你的简历表 base token"
+  resume_table_id: "你的简历表 table id"
 
   # 合同信息收集表（资源商填写银行/证件信息）
-  contract_base_token: "JbkRbkGf6aAqfnsCDHHlJMjbg3b"
-  contract_table_id: "tblePA7PmmYlS936"
+  contract_base_token: "你的合同信息表 base token"
+  contract_table_id: "你的合同信息表 table id"
 
   # 合同模板表（AI标注版模板，脚本自动下载，无需本地维护）
-  template_base_token: "WtNAb5ylMa0zqpsjciclnorugWb"
-  template_table_id: "tblAGv4MYDGtiZ5Z"
+  template_base_token: "你的合同模板表 base token"
+  template_table_id: "你的合同模板表 table id"
 ```
 
-> ⚠️ 上面是测试表的值，正式使用前换成生产表的值（找 penny 获取）。
+> 找项目负责人获取测试表或生产表的 base token / table id，不要把真实值提交到 Git。
+
+### LLM 配置
+
+简历解析会调用 LLM，需要显式配置 API Key。skill 不会自动读取 OpenClaw 的本机 provider 或 `openclaw.json`，避免静默消耗 OpenClaw 月度额度。
+
+```yaml
+llm:
+  base_url: "https://ai-proxy.37wan.com/anthropic"
+  model: "claude-sonnet-4-5-20250929"
+  api_key: ""                    # 你的 apiKey
+```
+
+如果不想把 key 写进 `config.local.yaml`，也可以设置环境变量：
+
+```bash
+export LOC_LLM_API_KEY="你的apiKey"
+```
 
 ### 路径配置
 
@@ -106,7 +131,7 @@ test_mode:
 对 OpenClaw 说：**「帮我验证资源管理配置」**
 
 OpenClaw 会自动检查：
-- ✅ config.yaml 格式正确
+- ✅ config.local.yaml 格式正确
 - ✅ SMTP 可以连通
 - ✅ lark-cli bot 权限正常
 - ✅ LLM api_key 有效
@@ -130,7 +155,7 @@ OpenClaw 会自动检查：
 
 ## 第七步：正式启用
 
-所有步骤验证通过后，修改 config.yaml：
+所有步骤验证通过后，修改 config.local.yaml：
 
 ```yaml
 test_mode:
@@ -165,7 +190,7 @@ test_mode:
 
 没有别的了。上下文、运行日志、评分明细由系统自动收集，每次导出后在 GitHub 自动开 issue，由项目负责人分析修复。
 
-**开启 Badcase 自动导出**：在 `config.yaml` 中设置：
+**开启 Badcase 自动导出**：在 `config.local.yaml` 中设置：
 
 ```yaml
 badcase_export:
@@ -193,8 +218,7 @@ badcase_export:
 
 | 想改什么 | 改哪里 |
 |---------|--------|
-| 评分规则（字数阈值、档位划分） | `config/resume_screening_rules_v2.json` |
-| 价格规则（各语言对目标价/上限） | `scripts/pricing_rules.json` |
+| 评分规则（字数阈值、档位划分、各语言对目标价/上限） | `config/resume_screening_rules_v2.json` |
 | LLM 解析 prompt | `scripts/parse_resumes.py` 第 49 行 `LLM_PROMPT` |
 | 邮件文案模板 | 各脚本里的 `EMAIL_TEMPLATE` 变量 |
 
@@ -224,5 +248,6 @@ pip3 install pyyaml
 - 确认 bot 在目标表格有管理员权限（找 penny 确认）
 
 **Q: LLM api_key 找不到**
-- 在 config.yaml 的 `llm.api_key` 里直接填
+- 在 config.local.yaml 的 `llm.api_key` 里直接填
 - 或设置环境变量：`export LOC_LLM_API_KEY="你的key"`
+- skill 不会自动读取 OpenClaw provider；这是为了避免消耗 OpenClaw 月度额度

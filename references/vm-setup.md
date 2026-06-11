@@ -29,9 +29,23 @@ openclaw skills list | grep loc-resume
 
 ## 第二步：配置 LLM API Key
 
-skill 会自动从你的 `~/.openclaw/openclaw.json` 里读取 `ai-proxy.37wan.com` 的 apiKey。
+LLM API Key 需要显式配置，skill 不会自动读取 OpenClaw 的个人或团队额度，避免静默消耗月度限额。
 
-**如果自动读取失败**，可以设置环境变量：
+推荐先复制模板，再写入本机配置 `config.local.yaml`：
+
+```bash
+cd ~/.agents/skills/loc-resume-screening
+cp config.example.yaml config.local.yaml
+```
+
+```yaml
+llm:
+  base_url: "https://ai-proxy.37wan.com/anthropic"
+  model: "claude-sonnet-4-5-20250929"
+  api_key: ""                    # 你的 apiKey
+```
+
+也可以设置环境变量：
 
 ```bash
 # 加到 ~/.zshrc 或 ~/.bashrc
@@ -53,7 +67,7 @@ lark-cli config bind --source openclaw --identity bot-only
 ```
 
 飞书 App 信息（找 penny 获取）：
-- App ID：`cli_a9361aaf32619eed`
+- App ID：由项目维护人提供，不写入 skill 包
 
 ## 第四步：确认可用
 
@@ -115,4 +129,5 @@ pip3 install anthropic
 
 **Q: API Key 读取失败**
 - 设置环境变量 `export LOC_LLM_API_KEY="你的key"`
-- 或在 OpenClaw 里配置 `ai-proxy.37wan.com` provider
+- 或在 `config.local.yaml` 的 `llm.api_key` 里填写
+- skill 不会自动读取 OpenClaw provider，避免消耗 OpenClaw 月度额度

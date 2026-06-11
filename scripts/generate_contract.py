@@ -20,6 +20,9 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
+from field_resolver import field_id_or
+from lark_cli_utils import normalize_record_list_data, run_lark_cli_json
+from manual_trace import log_manual_step
 from field_mapping import (
     FORM_BASE_TOKEN, FORM_TABLE_ID,
     ACCOUNT_TYPE_FIELD_ID,
@@ -47,40 +50,73 @@ OUTPUT_DIR = Path(get_paths(_CFG).get("contract_output", "~/Documents/loc-contra
 TEST_MODE  = is_test_mode(_CFG)
 TEST_EMAIL = get_test_email(_CFG)
 
-FLD_NAME      = "fld2JEyq9H"   # 姓名
-FLD_ACCT_NAME = "fldvZMzuk3"   # 个人账户户名（用于姓名校验）
-FLD_EMAIL     = "fldYELKkKa"   # 邮箱
-FLD_SIGNED    = "fldj4zCL5L"   # 合同签署 checkbox
-FLD_ID_SCAN   = "fldia8GcRh"   # 证件扫描件附件
+FLD_NAME      = field_id_or("contract_info", "contract.name", "fld2JEyq9H")
+FLD_ACCT_NAME = field_id_or("contract_info", "contract.bank_account_name", "fldvZMzuk3")
+FLD_EMAIL     = field_id_or("contract_info", "contract.email", "fldYELKkKa")
+FLD_SIGNED    = field_id_or("contract_info", "contract.signed_contract", "fldj4zCL5L")
+FLD_ID_SCAN   = field_id_or("contract_info", "contract.id_scan", "fldia8GcRh")
+FLD_ID_NO     = field_id_or("contract_info", "contract.id_number", "fld3hdHuVd")
+FLD_BANK_NAME = field_id_or("contract_info", "contract.bank_name", "fldyPyrLdp")
+FLD_BANK_ADDR = field_id_or("contract_info", "contract.bank_address", "fldDLk0Jh9")
+FLD_CURRENCY  = field_id_or("contract_info", "contract.currency", "fldSZE1Shy")
 
 
 # ── lark-cli 工具 ──────────────────────────────────────────────
 def lark(*args) -> dict:
-    r = subprocess.run(["lark-cli"] + list(args), capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"lark-cli 失败:\n{r.stderr.strip()}")
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"lark-cli 非 JSON:\n{r.stdout[:300]}")
+    resp = run_lark_cli_json(*args)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"lark-cli 非 JSON:\n{str(resp)[:300]}")
+    return resp
 
 
-def lark_download_attachment(file_token: str, dest: Path, base_token: str = None):
-    """下载飞书附件到本地路径，base_token 默认用合同信息收集表"""
-    token = base_token or COLLECT_BASE
+def lark_download_attachment(
+    file_token: str,
+    dest: Path,
+    *,
+    base_token: str,
+    table_id: str,
+    record_id: str,
+):
+    """下载飞书 Base 附件到本地路径。"""
     r = subprocess.run(
-        ["lark-cli", "base", "+attachment-download",
-         "--base-token", token,
+        ["lark-cli", "base", "+record-download-attachment",
+         "--base-token", base_token,
+         "--table-id", table_id,
+         "--record-id", record_id,
          "--file-token", file_token,
-         "--output", str(dest)],
-        capture_output=True, text=True
+         "--output", dest.name],
+        capture_output=True, text=True,
+        cwd=str(dest.parent),
     )
     if r.returncode != 0:
         raise RuntimeError(f"附件下载失败: {r.stderr.strip()}")
 
 
+def find_table_id_by_name(base_token: str, table_name: str) -> str:
+    """按表名查找 table_id，用于 config.yaml 中旧 table_id 失效时兜底。"""
+    try:
+        resp = lark("base", "+table-list", "--base-token", base_token, "--format", "json")
+    except Exception:
+        return ""
+    data = resp.get("data", resp)
+    raw_tables = []
+    for key in ("items", "tables", "table_list"):
+        if isinstance(data, dict) and isinstance(data.get(key), list):
+            raw_tables = data[key]
+            break
+    if not raw_tables and isinstance(resp.get("items"), list):
+        raw_tables = resp["items"]
+    for table in raw_tables:
+        name = table.get("name") or table.get("table_name") or ""
+        table_id = table.get("table_id") or table.get("id") or ""
+        if name == table_name and table_id:
+            return table_id
+    return ""
+
+
 # ── 记录拉取 ──────────────────────────────────────────────────
 def fetch_collect_records() -> list:
+    global COLLECT_TABLE
     records, page_token = [], None
     while True:
         args = ["base", "+record-list",
@@ -89,13 +125,18 @@ def fetch_collect_records() -> list:
                 "--format", "json", "--limit", "100"]
         if page_token:
             args += ["--page-token", page_token]
-        resp = lark(*args)
+        try:
+            resp = lark(*args)
+        except RuntimeError as e:
+            fallback_table = find_table_id_by_name(COLLECT_BASE, "合同信息收集")
+            if fallback_table and fallback_table != COLLECT_TABLE:
+                print(f"⚠️  合同信息表 ID 失效，已按表名 fallback：{fallback_table}")
+                COLLECT_TABLE = fallback_table
+                records, page_token = [], None
+                continue
+            raise e
         db = resp["data"]
-        fids = db.get("field_id_list", db.get("fields", []))
-        rids = db.get("record_id_list", [])
-        rows = db.get("data", [])
-        for rid, row in zip(rids, rows):
-            records.append({"record_id": rid, "fields": dict(zip(fids, row))})
+        records.extend(normalize_record_list_data(db))
         if not db.get("has_more") or not db.get("page_token"):
             break
         page_token = db["page_token"]
@@ -105,8 +146,13 @@ def fetch_collect_records() -> list:
 def fetch_template_records() -> list:
     resp = lark("base", "+record-list",
                 "--base-token", TEMPLATE_BASE,
-                "--table-id", TEMPLATE_TABLE)
+                "--table-id", TEMPLATE_TABLE,
+                "--format", "json")
     records = []
+    data = resp.get("data", {})
+    if data.get("data"):
+        records.extend(normalize_record_list_data(data))
+        return records
     for rec in resp.get("data", {}).get("records", []):
         records.append(rec)
     return records
@@ -130,6 +176,116 @@ def extract_text(val) -> str:
     return text
 
 
+def is_china_id_number(text: str) -> bool:
+    """Return True for common mainland China resident ID format."""
+    value = extract_text(text).replace(" ", "")
+    return bool(re.fullmatch(r"\d{17}[\dXx]", value))
+
+
+def has_domestic_bank_signal(text: str) -> bool:
+    value = extract_text(text).lower()
+    markers = [
+        "中国", "china", "beijing", "shanghai", "guangzhou", "shenzhen",
+        "hangzhou", "nanjing", "chengdu", "wuhan", "xiamen", "anhui", "hefei",
+        "工商银行", "农业银行", "中国银行", "建设银行", "招商银行", "交通银行",
+        "邮储", "中信", "光大", "浦发", "兴业", "民生", "广发", "平安银行",
+    ]
+    return any(marker in value for marker in markers)
+
+
+def is_domestic_personal_account(fields: dict) -> bool:
+    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
+    if not ("个人" in acct_type or "personal" in acct_type.lower()):
+        return False
+    id_no = extract_text(fields.get(FLD_ID_NO, ""))
+    bank_name = extract_text(fields.get(FLD_BANK_NAME, ""))
+    bank_addr = extract_text(fields.get(FLD_BANK_ADDR, ""))
+    return (
+        is_china_id_number(id_no) or
+        has_domestic_bank_signal(bank_name) or
+        has_domestic_bank_signal(bank_addr)
+    )
+
+
+def is_personal_account(fields: dict) -> bool:
+    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
+    return "个人" in acct_type or "personal" in acct_type.lower()
+
+
+def is_company_account(fields: dict) -> bool:
+    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
+    return "公司" in acct_type or "business" in acct_type.lower()
+
+
+def is_cny_currency(fields: dict) -> bool:
+    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
+    return "人民币" in currency or "cny" in currency or "rmb" in currency
+
+
+def is_foreign_currency(fields: dict) -> bool:
+    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
+    if not currency:
+        return False
+    foreign_markers = [
+        "外币", "usd", "美元", "eur", "欧元", "jpy", "日元", "krw", "韩元",
+        "hkd", "港币", "gbp", "英镑", "sgd", "新币", "aud", "cad",
+    ]
+    return any(marker in currency for marker in foreign_markers) and not is_cny_currency(fields)
+
+
+def score_contract_template(name: str, fields: dict) -> int:
+    """Score how well a template name matches account type, region, and currency.
+
+    Region and currency are intentionally separate. A domestic account can receive
+    foreign currency, and an overseas account can receive CNY.
+    """
+    lowered = name.lower()
+    is_company_acct = is_company_account(fields)
+    is_personal_acct = is_personal_account(fields)
+    is_domestic_personal = is_domestic_personal_account(fields)
+    wants_cny = is_cny_currency(fields)
+    wants_foreign = is_foreign_currency(fields)
+
+    score = 0
+
+    if is_company_acct:
+        if "公司" in name or "business" in lowered or "company" in lowered:
+            score += 40
+        if "个人" in name or "personal" in lowered:
+            score -= 20
+        return score
+
+    if is_personal_acct:
+        if "个人" in name or "personal" in lowered:
+            score += 20
+        if "公司" in name or "business" in lowered or "company" in lowered:
+            score -= 30
+
+    if is_domestic_personal:
+        if "境内个人" in name:
+            score += 30
+        if "境外" in name or "foreign" in lowered:
+            score -= 20
+    else:
+        if "境外" in name or "foreign" in lowered:
+            score += 20
+        if "境内个人" in name:
+            score -= 15
+
+    if wants_cny:
+        if "人民币" in name or "cny" in lowered or "rmb" in lowered:
+            score += 30
+        if "外币" in name or "foreign currency" in lowered:
+            score -= 25
+    elif wants_foreign:
+        if "外币" in name or "foreign currency" in lowered:
+            score += 30
+        if "人民币" in name or "cny" in lowered or "rmb" in lowered:
+            score -= 25
+
+    return score
+
+
 def extract_attachments(val) -> list:
     """返回附件列表 [{name, file_token, size}]"""
     if not val or not isinstance(val, list):
@@ -139,6 +295,32 @@ def extract_attachments(val) -> list:
         if isinstance(item, dict) and item.get("file_token"):
             result.append(item)
     return result
+
+
+def open_docx(path: Path) -> bool:
+    """Open generated docx, preferring WPS when installed on macOS."""
+    candidates = []
+    wps_path = Path("/Applications/wpsoffice.app")
+    if wps_path.exists():
+        candidates.append(["open", "-a", str(wps_path), str(path)])
+    candidates.extend([
+        ["open", "-b", "com.kingsoft.wpsoffice.mac", str(path)],
+        ["open", str(path)],
+    ])
+    last_error = ""
+    for cmd in candidates:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            if "wpsoffice" in " ".join(cmd).lower():
+                print("✅ 已使用 WPS 打开合同预览")
+            else:
+                print("✅ 已打开合同预览")
+            return True
+        last_error = (result.stderr or result.stdout or "").strip()
+    print(f"⚠️  自动打开失败，请手动打开：{path}")
+    if last_error:
+        print(f"   系统返回：{last_error}")
+    return False
 
 
 # ── 模板匹配 ──────────────────────────────────────────────────
@@ -151,13 +333,10 @@ def match_template(template_records: list, contract_name: str) -> dict | None:
     return None
 
 
-def pick_template_for_candidate(template_records: list, fields: dict) -> tuple[dict | None, str]:
+def pick_template_for_candidate(template_records: list, fields: dict, auto_confirm: bool = False) -> tuple[dict | None, str]:
     """
     根据候选人账户类型自动推荐合同模板，VM 可直接回车确认或手动选择。
     """
-    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
-    is_company_acct = "公司" in acct_type or "Business" in acct_type
-
     available = []
     for rec in template_records:
         name = extract_text(rec.get("fields", {}).get(TEMPLATE_NAME_FLD, ""))
@@ -171,23 +350,18 @@ def pick_template_for_candidate(template_records: list, fields: dict) -> tuple[d
         print("❌ 合同模板表中无可用模板")
         return None, ""
 
-    # 按账户类型打分排序（最匹配的排最前）
-    def score(name):
-        s = 0
-        if is_company_acct and ("公司" in name or "Business" in name or "company" in name.lower()):
-            s += 10
-        if not is_company_acct and "公司" not in name and "Business" not in name:
-            s += 5
-        return s
-
-    available.sort(key=lambda x: score(x[1]), reverse=True)
+    available.sort(key=lambda x: score_contract_template(x[1], fields), reverse=True)
 
     print("\n可用合同模板：")
     for i, (rec, name) in enumerate(available, 1):
         tag = "  ← 推荐" if i == 1 else ""
         print(f"  {i:>2}. {name}{tag}")
 
-    choice = input(f"\n请输入模板序号（直接回车使用推荐 [1]）: ").strip()
+    if auto_confirm:
+        print("\n--yes 模式：自动使用推荐模板 [1]")
+        choice = "1"
+    else:
+        choice = input(f"\n请输入模板序号（直接回车使用推荐 [1]）: ").strip()
     if choice == "":
         choice = "1"
     try:
@@ -230,9 +404,10 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
             "签署年": str(sd.year),
             "签署月": f"{sd.month:02d}",
             "签署日": f"{sd.day:02d}",
+            "甲方合同编号": "",
         }
     except ValueError:
-        auto_vals = {"签署年": "", "签署月": "", "签署日": ""}
+        auto_vals = {"签署年": "", "签署月": "", "签署日": "", "甲方合同编号": ""}
 
     for var in required_vars:
         key = f"{{{{{var}}}}}"   # "{{变量名}}"
@@ -261,7 +436,7 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
 
         # 4. 乙方签署 = 乙方姓名
         if var == "乙方签署":
-            val = extract_text(fields.get("fld2JEyq9H", ""))
+            val = extract_text(fields.get(COMMON_FORM_FIELDS["乙方姓名"], ""))
             var_map[key] = val
             (filled if val else empty).append(var)
             continue
@@ -362,7 +537,7 @@ def insert_id_scan(doc: Document, image_paths: list[Path]):
         print(f"  ✅ 插入图片：{img_path.name}（宽 {img_w_inches:.1f} 英寸）")
 
 
-def download_id_scan_images(fields: dict, tmpdir: Path) -> list[Path]:
+def download_id_scan_images(fields: dict, tmpdir: Path, record_id: str) -> list[Path]:
     """从飞书下载证件扫描件图片到临时目录，返回本地路径列表"""
     attachments = extract_attachments(fields.get(FLD_ID_SCAN, []))
     if not attachments:
@@ -374,7 +549,13 @@ def download_id_scan_images(fields: dict, tmpdir: Path) -> list[Path]:
         filename   = att.get("name", f"id_scan_{file_token[:8]}.jpg")
         dest = tmpdir / filename
         try:
-            lark_download_attachment(file_token, dest, base_token=COLLECT_BASE)  # 收集表 token
+            lark_download_attachment(
+                file_token,
+                dest,
+                base_token=COLLECT_BASE,
+                table_id=COLLECT_TABLE,
+                record_id=record_id,
+            )
             paths.append(dest)
             print(f"  ✅ 下载证件扫描件：{filename}")
         except Exception as e:
@@ -556,7 +737,11 @@ def main():
     print("\n拉取合同模板表...")
     template_records = fetch_template_records()
 
-    template_rec, template_name = pick_template_for_candidate(template_records, fields)
+    template_rec, template_name = pick_template_for_candidate(
+        template_records,
+        fields,
+        auto_confirm=args.yes or args.dry_run,
+    )
     if not template_rec:
         print("❌ 未选择模板，退出"); sys.exit(1)
 
@@ -621,7 +806,16 @@ def main():
                 sys.exit(0)
 
     if args.dry_run:
-        print("\n[DRY-RUN] 不生成文件"); return
+        print("\n[DRY-RUN] 不生成文件")
+        log_manual_step(
+            step_name="合同生成 dry-run",
+            status="skipped",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"模板: {template_name}",
+            output_summary=f"已填充 {len(filled)} 个变量; 空字段 {len(empty)}; 未匹配 {len(unmatched)}",
+        )
+        return
 
     # ── 下载模板 docx ──
     att_list = extract_attachments(template_rec.get("fields", {}).get(TEMPLATE_ATT_FLD, []))
@@ -633,13 +827,16 @@ def main():
         template_docx = tmpdir / att_list[0]["name"]
 
         print(f"\n下载模板：{att_list[0]['name']}")
-        # 用 base +attachment-download from TEMPLATE_BASE
+        # 下载 Base 附件需使用 record_id + file_token
         r = subprocess.run(
-            ["lark-cli", "base", "+attachment-download",
+            ["lark-cli", "base", "+record-download-attachment",
              "--base-token", TEMPLATE_BASE,
+             "--table-id", TEMPLATE_TABLE,
+             "--record-id", template_rec["record_id"],
              "--file-token", att_list[0]["file_token"],
-             "--output", str(template_docx)],
-            capture_output=True, text=True
+             "--output", template_docx.name],
+            capture_output=True, text=True,
+            cwd=str(template_docx.parent),
         )
         if r.returncode != 0:
             print(f"❌ 模板下载失败：{r.stderr}"); sys.exit(1)
@@ -652,7 +849,7 @@ def main():
         # ── 插入证件扫描件 ──
         if id_scans and not is_company:
             print("\n下载并插入证件扫描件...")
-            img_paths = download_id_scan_images(fields, tmpdir)
+            img_paths = download_id_scan_images(fields, tmpdir, target["record_id"])
             if img_paths:
                 insert_id_scan(doc, img_paths)
             else:
@@ -681,23 +878,26 @@ def main():
             print("   提示：这些位置在合同中将显示为空白或原始占位符。")
         else:
             print("✅ 二次检查通过：所有变量已替换完毕")
+            log_manual_step(
+                step_name="合同 docx 生成",
+                status="done",
+                candidate_name=name,
+                candidate_record_id=target["record_id"],
+                input_summary=f"模板: {template_name}",
+                output_summary=f"文件: {output_path}",
+            )
 
-        import subprocess as sp
-        sp.run(["open", str(output_path)])
+        open_docx(output_path)
 
         # ── 发送邮件 ──
         if args.send:
             lang = "zh" if re.search(r'[\u4e00-\u9fff]', name) else "en"
             print(f"\n发送邮件（语言：{lang}）...")
             send_email(email_addr, name, output_path, lang=lang, draft=args.draft)
-            # 写回飞书
-            payload = json.dumps({FLD_SIGNED: True}, ensure_ascii=False)
-            lark("base", "+record-upsert",
-                 "--base-token", COLLECT_BASE,
-                 "--table-id", COLLECT_TABLE,
-                 "--record-id", target["record_id"],
-                 "--json", payload)
-            print("✅ 飞书「合同签署」已勾选")
+            if args.draft:
+                print("📝 已保存本地合同邮件草稿，不更新「合同签署」字段。")
+            else:
+                print("✅ 合同邮件已发送；「合同签署」字段等待签回核查节点更新。")
         else:
             print(f"\n合同已打开预览，确认无误后运行：")
             print(f"  python3 scripts/generate_contract.py --name '{name}' --send")

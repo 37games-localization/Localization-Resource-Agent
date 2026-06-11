@@ -6,4 +6,10 @@ __pycache__/
 output/
 drafts/
 .loc-resume-cache/
+config.yaml
+config.local.yaml
 config.yaml.local
+*.local.yaml
+.env
+.env.*
+config/lark-field-mapping.yaml

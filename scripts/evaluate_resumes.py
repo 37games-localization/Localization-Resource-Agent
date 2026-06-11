@@ -4,7 +4,7 @@ evaluate_resumes.py
 ===================
 方向B 新脚本：LLM 一次性完成简历解析 + 评分，规则层只做价格硬校验。
 
-价格标准运行时从飞书「评分规则配置」表读取，不硬编码。
+价格标准默认读取包内规则；如配置了飞书「评分规则配置」表，则优先从飞书读取。
 LLM 输出结构化 JSON，直接写回飞书候选人表。
 
 用法：
@@ -32,13 +32,15 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_lark, get_llm_api_key
+from lark_cli_utils import normalize_record_list_data
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 _CFG        = load_config()
 _LARK       = get_lark(_CFG)
-BASE_TOKEN  = _LARK.get("base_token", "") or "JbkRbkGf6aAqfnsCDHHlJMjbg3b"  # fallback 测试表
-TABLE_ID    = _LARK.get("resume_table_id", "") or "tbll1fWOund3PSgd"
-RULES_TABLE = "tbl65NXQt5ebhnHa"   # 评分规则配置表（固定，不随环境变化）
+BASE_TOKEN  = _LARK.get("base_token", "")
+TABLE_ID    = _LARK.get("resume_table_id", "")
+RULES_TABLE = _LARK.get("rules_table_id", "")
+LOCAL_RULES_PATH = Path(__file__).parent.parent / "config" / "resume_screening_rules_v2.json"
 PDF_CACHE   = Path.home() / ".loc-resume-cache"
 PDF_CACHE.mkdir(exist_ok=True)
 
@@ -183,7 +185,14 @@ def lark_cli(*args) -> dict:
 
 
 def fetch_price_rules() -> dict:
-    """从飞书「评分规则配置」表读取价格标准，返回 {语言对标准化key: {aipe_target, aipe_max, trans_target, trans_max}}"""
+    """读取价格标准，返回 {语言对标准化key: {aipe_target, aipe_max, trans_target, trans_max}}.
+
+    默认使用包内规则，保证 VM 安装后不需要从 0 配规则表。
+    如 config.local.yaml 配置了 lark.rules_table_id，则优先读取飞书规则表，
+    便于后续团队替换或集中维护各语种单价范围。
+    """
+    if not BASE_TOKEN or not RULES_TABLE:
+        return load_local_price_rules()
     resp = lark_cli(
         "api", "GET",
         f"/open-apis/bitable/v1/apps/{BASE_TOKEN}/tables/{RULES_TABLE}/records",
@@ -208,6 +217,31 @@ def fetch_price_rules() -> dict:
             "aipe_max":     float(gv("AIPE上限价") or 0),
             "trans_target": float(gv("翻译预期价") or 0),
             "trans_max":    float(gv("翻译上限价") or 0),
+        }
+    if not rules:
+        print("⚠️  飞书评分规则表为空，回退使用包内默认规则")
+        return load_local_price_rules()
+    return rules
+
+
+def load_local_price_rules() -> dict:
+    """Load packaged price rules from config/resume_screening_rules_v2.json."""
+    if not LOCAL_RULES_PATH.exists():
+        raise RuntimeError(f"缺少包内评分规则文件：{LOCAL_RULES_PATH}")
+    data = json.loads(LOCAL_RULES_PATH.read_text(encoding="utf-8"))
+    price_rules = data.get("price_rules", {})
+    aipe_rules = price_rules.get("aipe", {})
+    trans_rules = price_rules.get("translation", {})
+    keys = sorted(set(aipe_rules) | set(trans_rules))
+    rules = {}
+    for key in keys:
+        aipe = aipe_rules.get(key, {})
+        trans = trans_rules.get(key, {})
+        rules[key] = {
+            "aipe_target": float(aipe.get("target", 0.03)),
+            "aipe_max": float(aipe.get("max", 0.04)),
+            "trans_target": float(trans.get("target", aipe.get("target", 0.03))),
+            "trans_max": float(trans.get("max", aipe.get("max", 0.04))),
         }
     return rules
 
@@ -314,12 +348,9 @@ def fetch_all_records() -> list[dict]:
             args += ["--page-token", page_token]
         resp = lark_cli(*args)
         db = resp.get("data", {})
-        field_names = db.get("fields", [])
-        record_ids  = db.get("record_id_list", [])
-        rows        = db.get("data", [])
-        for rid, row in zip(record_ids, rows):
-            records.append({"record_id": rid, "fields": dict(zip(field_names, row))})
-        print(f"  第{page}页：{len(record_ids)} 条，累计 {len(records)} 条")
+        page_records = normalize_record_list_data(db)
+        records.extend(page_records)
+        print(f"  第{page}页：{len(page_records)} 条，累计 {len(records)} 条")
         if not db.get("has_more"):
             break
         page_token = db.get("page_token")
@@ -403,19 +434,67 @@ def write_record(record_id: str, fields: dict, dry_run: bool) -> bool:
 
 MAX_RETRIES = 3
 
+LLM_PROVIDER = _CFG.get("llm", {}).get("provider", "anthropic")
+
+def call_openai_compatible(prompt: str) -> str:
+    import ssl
+    import urllib.request
+    import urllib.error
+    try:
+        import certifi
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ssl_context = ssl.create_default_context()
+
+    base_url = PROXY_URL.rstrip("/")
+    url = f"{base_url}/chat/completions"
+    payload = json.dumps(
+        {
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 2000,
+            "temperature": 0,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {PROXY_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90, context=ssl_context) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")[:300]
+        raise RuntimeError(f"OpenAI-compatible LLM HTTP {e.code}: {detail}") from e
+    return body["choices"][0]["message"]["content"].strip()
+
 def call_llm(prompt: str) -> dict | None:
-    import anthropic
-    client = anthropic.Anthropic(base_url=PROXY_URL, api_key=PROXY_KEY)
+    client = None
+    if LLM_PROVIDER not in {"deepseek", "openai_compatible"}:
+        import anthropic
+        client = anthropic.Anthropic(base_url=PROXY_URL, api_key=PROXY_KEY)
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            msg = client.messages.create(
-                model=LLM_MODEL,
-                max_tokens=2000,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = msg.content[0].text.strip()
+            if LLM_PROVIDER in {"deepseek", "openai_compatible"}:
+                raw = call_openai_compatible(prompt)
+            else:
+                msg = client.messages.create(
+                    model=LLM_MODEL,
+                    max_tokens=2000,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = msg.content[0].text.strip()
             raw = re.sub(r'^```[\w]*\n?', '', raw).strip()
             raw = re.sub(r'\n?```$', '', raw).strip()
             m = re.search(r'\{.*\}', raw, re.DOTALL)
@@ -455,6 +534,22 @@ def hard_validate_price(result: dict, price_rule: dict) -> list[str]:
         if price_score > 0:
             warnings.append(f"⚠️ 价格超上限但 LLM 给了 {price_score} 分，请人工复核")
     return warnings
+
+
+def clamp_final_score(result: dict) -> tuple[dict, float, bool]:
+    """Cap final_score to 0-100 before writing to Lark."""
+    raw_score = result.get("final_score", 0)
+    try:
+        raw_num = float(raw_score)
+    except (TypeError, ValueError):
+        raw_num = 0.0
+    capped = max(0.0, min(100.0, raw_num))
+    if capped.is_integer():
+        capped_value = int(capped)
+    else:
+        capped_value = round(capped, 1)
+    result["final_score"] = capped_value
+    return result, raw_num, capped_value != raw_num
 
 
 # ── 构建 prompt ───────────────────────────────────────────────────────────────
@@ -524,7 +619,10 @@ def main():
         print("⚠️  DRY-RUN 模式：不写入飞书\n")
 
     # 读价格规则
-    print("读取飞书价格规则配置...")
+    if BASE_TOKEN and RULES_TABLE:
+        print("读取飞书价格规则配置...")
+    else:
+        print("读取包内默认价格规则配置...")
     price_rules = fetch_price_rules()
     print(f"✅ 已读取 {len(price_rules)} 条语言对价格规则\n")
 
@@ -587,6 +685,8 @@ def main():
             err_count += 1
             continue
 
+        result, raw_final_score, score_was_capped = clamp_final_score(result)
+
         # 价格硬校验
         if price_rule:
             warnings = hard_validate_price(result, price_rule)
@@ -602,14 +702,23 @@ def main():
               f"有效={result.get('is_valid_resume','?')}  "
               f"字数来源=[{result.get('word_count_source','?')}]  "
               f"置信度=[{result.get('confidence','?')}]")
+        if score_was_capped:
+            print(f"  ⚠️  LLM 原始总分 {raw_final_score:g}，按满分规则封顶为 {result.get('final_score',0)}")
 
         # 构建写回字段
         now_ms = int(time.time() * 1000)
+        final_line = (
+            f"最终：{result.get('initial_score',0)} + {result.get('bonus',0)} - {result.get('penalty',0)} = "
+            f"{raw_final_score:g}分"
+        )
+        if score_was_capped:
+            final_line += f"，按满分规则封顶为 {result.get('final_score',0)}分"
+        final_line += f" → {result.get('tier','?')}档"
         basis_text = (
             f"【价格维度 {result.get('price_score',0)}/50】\n{result.get('price_score_basis','')}\n\n"
             f"【资历维度 {result.get('exp_score',0)}/50】\n{result.get('exp_score_basis','')}\n\n"
             f"【加减分 +{result.get('bonus',0)} -{result.get('penalty',0)}】\n{result.get('bonus_penalty_basis','')}\n\n"
-            f"最终：{result.get('initial_score',0)} + {result.get('bonus',0)} - {result.get('penalty',0)} = {result.get('final_score',0)}分 → {result.get('tier','?')}档"
+            f"{final_line}"
         )
 
         write_fields = {

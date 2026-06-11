@@ -25,27 +25,35 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_loader import load_config, get_lark
+from config_loader import load_config
+from field_resolver import field_id, table_ref
+from manual_trace import log_manual_step
 
 # ── 常量 ─────────────────────────────────────────────────────────────────────
 SKILL_ROOT   = Path(__file__).parent.parent
 SNAPSHOT_VER = "1.0"
 
-MAIN_BASE_TOKEN = "HekabpDDkaUzyCsjKpqlCEFJgQf"
-MAIN_TABLE_ID   = "tblkYSN55qkj9Td4"
+MAIN_BASE_TOKEN = ""
+MAIN_TABLE_ID   = ""
+FIELDS: dict[str, str] = {}
 
-# 字段 ID
-FIELD_NAME        = "fldQDTAGAO"
-FIELD_BADCASE     = "fldxTGrPF3"   # 是否Badcase
-FIELD_EXPECTED    = "fldqs6UgTv"   # 期望结果
-FIELD_STATUS      = "fldOJfq2kS"   # 当前状态
-FIELD_LANG        = "fldiy5OSEA"   # 语言对
-FIELD_SERVICE     = "fldssgQ0Dw"   # 服务类型
-FIELD_SCORE       = "fldbBEzyvM"   # AI评分
-FIELD_SCORE_GRADE = "fld2zpqoEt"   # 评分等级
-FIELD_AI_SUGGEST  = "fld6ZTTzTd"   # AI建议
-FIELD_SCORE_BASIS = "fld60e9uZ2"   # 评分依据
-FIELD_SNAPSHOT    = "fldkpbZ4g5"   # Badcase快照（附件）
+
+def _init_lark_refs():
+    """Load current table and field IDs from config/lark-field-mapping.yaml."""
+    global MAIN_BASE_TOKEN, MAIN_TABLE_ID, FIELDS
+    MAIN_BASE_TOKEN, MAIN_TABLE_ID = table_ref("candidate")
+    FIELDS = {
+        "badcase": field_id("candidate", "candidate.badcase_flag"),
+        "expected": field_id("candidate", "candidate.expected_result"),
+        "snapshot": field_id("candidate", "candidate.badcase_snapshot"),
+        "status": field_id("candidate", "candidate.status"),
+        "language_pair": field_id("candidate", "candidate.language_pair"),
+        "services": field_id("candidate", "candidate.services"),
+        "score": field_id("candidate", "candidate.score"),
+        "tier": field_id("candidate", "candidate.tier"),
+        "ai_suggestion": field_id("candidate", "candidate.ai_suggestion"),
+        "score_basis": field_id("candidate", "candidate.score_basis"),
+    }
 
 # 安全扫描模式
 DANGER_PATTERNS = [
@@ -135,23 +143,27 @@ def _load_run_log(record_id: str) -> dict:
 # ── 核心流程 ──────────────────────────────────────────────────────────────────
 
 def fetch_badcases() -> list[dict]:
+    _init_lark_refs()
     result = _lark_cli(
-        "base", "+record-search",
+        "base", "+record-list",
         "--base-token", MAIN_BASE_TOKEN,
         "--table-id", MAIN_TABLE_ID,
-        "--filter", json.dumps({
-            "conjunction": "and",
-            "conditions": [{
-                "field_id": FIELD_BADCASE,
-                "operator": "is",
-                "value": ["⚠️ 是"]
-            }]
-        })
+        "--filter-json", json.dumps({
+            "logic": "and",
+            "conditions": [[FIELDS["badcase"], "intersects", ["⚠️ 是"]]],
+        }, ensure_ascii=False),
+        "--limit", "200",
     )
     if not result.get("ok"):
         print(f"❌ 飞书查询失败：{result.get('error', result)}")
         return []
-    return result.get("data", {}).get("items", [])
+    data = result.get("data", result)
+    for key in ("items", "records", "record_list"):
+        if isinstance(data, dict) and isinstance(data.get(key), list):
+            return data[key]
+    if isinstance(result.get("items"), list):
+        return result["items"]
+    return []
 
 
 def build_snapshot(record: dict, salt: str) -> dict:
@@ -167,19 +179,19 @@ def build_snapshot(record: dict, salt: str) -> dict:
             "record_id_hash": anon,
         },
         "badcase": {
-            "vm_expected_result": _field_text(record, FIELD_EXPECTED) or "(未填写)",
-            "current_status": _field_text(record, FIELD_STATUS),
+            "vm_expected_result": _field_text(record, FIELDS["expected"]) or "(未填写)",
+            "current_status": _field_text(record, FIELDS["status"]),
         },
         "resource": {
             "anonymous_id": anon,
-            "language_pair": _field_text(record, FIELD_LANG),
-            "services":      _field_text(record, FIELD_SERVICE),
+            "language_pair": _field_text(record, FIELDS["language_pair"]),
+            "services":      _field_text(record, FIELDS["services"]),
         },
         "assessment": {
-            "ai_score":      _field_text(record, FIELD_SCORE),
-            "score_grade":   _field_text(record, FIELD_SCORE_GRADE),
-            "ai_suggestion": _field_text(record, FIELD_AI_SUGGEST),
-            "score_basis":   _field_text(record, FIELD_SCORE_BASIS),
+            "ai_score":      _field_text(record, FIELDS["score"]),
+            "score_grade":   _field_text(record, FIELDS["tier"]),
+            "ai_suggestion": _field_text(record, FIELDS["ai_suggestion"]),
+            "score_basis":   _field_text(record, FIELDS["score_basis"]),
         },
         "agent_run": run_log,
         "redaction": {
@@ -218,7 +230,7 @@ def upload_snapshot_to_lark(record_id: str, snap: dict, dry_run: bool, quiet: bo
                 "--base-token", MAIN_BASE_TOKEN,
                 "--table-id", MAIN_TABLE_ID,
                 "--record-id", record_id,
-                "--field-id", FIELD_SNAPSHOT,
+                "--field-id", FIELDS["snapshot"],
                 "--file", tmp_path,
                 "--filename", filename,
                 "--format", "json"
@@ -293,10 +305,25 @@ def main():
     if not args.quiet:
         if args.dry_run:
             print(f"\n[dry-run] 完成，共 {len(records)} 条，未实际上传")
+            log_manual_step(
+                step_name="Badcase 快照 dry-run",
+                status="skipped",
+                input_summary=f"Badcase 数量: {len(records)}",
+                output_summary="已生成脱敏快照预览，未上传附件",
+            )
         else:
             print(f"\n🎉 完成，{success}/{len(records)} 条快照已上传至飞书附件")
             if success > 0:
                 print("   项目负责人可运行 push_badcase_issues.py 从飞书读取并开 GitHub issue")
+
+    if not args.dry_run:
+        log_manual_step(
+            step_name="Badcase 快照上传",
+            status="done" if success == len(records) else "failed",
+            input_summary=f"Badcase 数量: {len(records)}",
+            output_summary=f"上传成功: {success}/{len(records)}",
+            step_type="action" if success == len(records) else "error",
+        )
 
 
 if __name__ == "__main__":
