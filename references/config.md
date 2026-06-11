@@ -69,7 +69,7 @@ llm:
 | 文件 | 路径 |
 |------|------|
 | 引擎主文件 | `scripts/resume_screening_engine_v2.py` |
-| 价格规则 | `scripts/pricing_rules.json` |
+| 评分规则与价格范围 | `config/resume_screening_rules_v2.json` |
 | PDF 缓存目录 | `~/.loc-resume-cache/` |
 
 ## 评分规则摘要（V2.1）
@@ -84,7 +84,7 @@ llm:
 - 有议价空间：价格×0.9（有一些）或×0.7（较大）
 - 满分标准：调整后价格 ≤ 语言对目标价
 - 超出上限（hard_limit）：0分
-- 价格规则按语言对配置，见 `pricing_rules.json`
+- 价格规则按语言对配置，见 `config/resume_screening_rules_v2.json` 的 `price_rules`
 
 ### 资历评分（50分）
 **优先级**：LLM 解析字段 > 正则提取 > 年限估算 > 项目数估算

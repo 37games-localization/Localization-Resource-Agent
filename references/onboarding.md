@@ -218,8 +218,7 @@ badcase_export:
 
 | 想改什么 | 改哪里 |
 |---------|--------|
-| 评分规则（字数阈值、档位划分） | `config/resume_screening_rules_v2.json` |
-| 价格规则（各语言对目标价/上限） | `scripts/pricing_rules.json` |
+| 评分规则（字数阈值、档位划分、各语言对目标价/上限） | `config/resume_screening_rules_v2.json` |
 | LLM 解析 prompt | `scripts/parse_resumes.py` 第 49 行 `LLM_PROMPT` |
 | 邮件文案模板 | 各脚本里的 `EMAIL_TEMPLATE` 变量 |
 

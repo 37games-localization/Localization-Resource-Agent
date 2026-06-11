@@ -270,8 +270,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 ## 单点优化入口
 | 想改什么 | 文件 |
 |---------|------|
-| 评分规则（字数阈值/档位） | `config/resume_screening_rules_v2.json` |
-| 价格规则（各语言对目标价） | `scripts/pricing_rules.json` |
+| 评分规则（含字数阈值/档位/各语言对价格范围） | `config/resume_screening_rules_v2.json` |
 | LLM 解析 prompt | `scripts/parse_resumes.py` 第 49 行 |
 | 邮件文案 | 各脚本里的 `EMAIL_TEMPLATE` |
 | 所有环境配置 | `config.local.yaml`（本机唯一入口，由 `config.example.yaml` 复制生成） |
@@ -288,6 +287,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 **文件**：`config/resume_screening_rules_v2.json`
 
 这里存着**各语言对的目标价 + 上限价**，评分引擎用它判断资源商报价是否合理。**市场行情变了就需要来改**。
+`scripts/pricing_rules.json` 仅保留为历史/参考文件；主评分流程默认读取本文件中的 `price_rules`。
 
 目前配置示例：
 | 语言对 | AIPE 目标价 | 翻译 目标价 |

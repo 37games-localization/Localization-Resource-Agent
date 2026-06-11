@@ -4,7 +4,7 @@ evaluate_resumes.py
 ===================
 方向B 新脚本：LLM 一次性完成简历解析 + 评分，规则层只做价格硬校验。
 
-价格标准运行时从飞书「评分规则配置」表读取，表 ID 从 config.local.yaml 读取。
+价格标准默认读取包内规则；如配置了飞书「评分规则配置」表，则优先从飞书读取。
 LLM 输出结构化 JSON，直接写回飞书候选人表。
 
 用法：
@@ -39,6 +39,7 @@ _LARK       = get_lark(_CFG)
 BASE_TOKEN  = _LARK.get("base_token", "")
 TABLE_ID    = _LARK.get("resume_table_id", "")
 RULES_TABLE = _LARK.get("rules_table_id", "")
+LOCAL_RULES_PATH = Path(__file__).parent.parent / "config" / "resume_screening_rules_v2.json"
 PDF_CACHE   = Path.home() / ".loc-resume-cache"
 PDF_CACHE.mkdir(exist_ok=True)
 
@@ -183,9 +184,14 @@ def lark_cli(*args) -> dict:
 
 
 def fetch_price_rules() -> dict:
-    """从飞书「评分规则配置」表读取价格标准，返回 {语言对标准化key: {aipe_target, aipe_max, trans_target, trans_max}}"""
+    """读取价格标准，返回 {语言对标准化key: {aipe_target, aipe_max, trans_target, trans_max}}.
+
+    默认使用包内规则，保证 VM 安装后不需要从 0 配规则表。
+    如 config.local.yaml 配置了 lark.rules_table_id，则优先读取飞书规则表，
+    便于后续团队替换或集中维护各语种单价范围。
+    """
     if not BASE_TOKEN or not RULES_TABLE:
-        raise RuntimeError("缺少 lark.base_token 或 lark.rules_table_id，无法读取评分规则配置表")
+        return load_local_price_rules()
     resp = lark_cli(
         "api", "GET",
         f"/open-apis/bitable/v1/apps/{BASE_TOKEN}/tables/{RULES_TABLE}/records",
@@ -210,6 +216,31 @@ def fetch_price_rules() -> dict:
             "aipe_max":     float(gv("AIPE上限价") or 0),
             "trans_target": float(gv("翻译预期价") or 0),
             "trans_max":    float(gv("翻译上限价") or 0),
+        }
+    if not rules:
+        print("⚠️  飞书评分规则表为空，回退使用包内默认规则")
+        return load_local_price_rules()
+    return rules
+
+
+def load_local_price_rules() -> dict:
+    """Load packaged price rules from config/resume_screening_rules_v2.json."""
+    if not LOCAL_RULES_PATH.exists():
+        raise RuntimeError(f"缺少包内评分规则文件：{LOCAL_RULES_PATH}")
+    data = json.loads(LOCAL_RULES_PATH.read_text(encoding="utf-8"))
+    price_rules = data.get("price_rules", {})
+    aipe_rules = price_rules.get("aipe", {})
+    trans_rules = price_rules.get("translation", {})
+    keys = sorted(set(aipe_rules) | set(trans_rules))
+    rules = {}
+    for key in keys:
+        aipe = aipe_rules.get(key, {})
+        trans = trans_rules.get(key, {})
+        rules[key] = {
+            "aipe_target": float(aipe.get("target", 0.03)),
+            "aipe_max": float(aipe.get("max", 0.04)),
+            "trans_target": float(trans.get("target", aipe.get("target", 0.03))),
+            "trans_max": float(trans.get("max", aipe.get("max", 0.04))),
         }
     return rules
 
@@ -574,7 +605,10 @@ def main():
         print("⚠️  DRY-RUN 模式：不写入飞书\n")
 
     # 读价格规则
-    print("读取飞书价格规则配置...")
+    if BASE_TOKEN and RULES_TABLE:
+        print("读取飞书价格规则配置...")
+    else:
+        print("读取包内默认价格规则配置...")
     price_rules = fetch_price_rules()
     print(f"✅ 已读取 {len(price_rules)} 条语言对价格规则\n")
 
