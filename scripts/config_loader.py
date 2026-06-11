@@ -2,10 +2,12 @@
 config_loader.py
 ================
 统一配置读取模块，所有脚本 import 这里。
-自动查找 config.yaml，路径优先级：
-  1. 脚本同目录的上一层（skill 根目录）
-  2. 环境变量 LOC_CONFIG_PATH 指定路径
-  3. ~/.agents/skills/loc-resume-screening/config.yaml
+自动查找配置，路径优先级：
+  1. 环境变量 LOC_CONFIG_PATH 指定路径
+  2. skill 根目录 config.local.yaml（本机真实配置，不提交）
+  3. skill 根目录 config.yaml（可提交模板 / VM 可复制后填写）
+  4. ~/.agents/skills/loc-resume-screening/config.local.yaml
+  5. ~/.agents/skills/loc-resume-screening/config.yaml
 """
 
 import os
@@ -19,10 +21,13 @@ def _find_config_path() -> Path:
     if env_path and Path(env_path).exists():
         return Path(env_path)
 
-    # 从当前脚本向上找 config.yaml
+    # 从当前脚本向上找本机私有配置，其次才读模板配置
     candidates = [
+        Path(__file__).parent.parent / "config.local.yaml",
         Path(__file__).parent.parent / "config.yaml",   # skill 根目录
+        Path(__file__).parent / "config.local.yaml",
         Path(__file__).parent / "config.yaml",           # scripts 目录
+        Path.home() / ".agents" / "skills" / "loc-resume-screening" / "config.local.yaml",
         Path.home() / ".agents" / "skills" / "loc-resume-screening" / "config.yaml",
     ]
     for p in candidates:
@@ -30,6 +35,11 @@ def _find_config_path() -> Path:
             return p
 
     return None
+
+
+def get_config_path() -> Path | None:
+    """Return the active config path, mainly for diagnostics."""
+    return _find_config_path()
 
 
 def load_config() -> dict:
@@ -42,8 +52,11 @@ def load_config() -> dict:
 
     config_path = _find_config_path()
     if not config_path:
-        print("❌ 找不到 config.yaml，请确认 skill 目录结构完整")
-        print("   预期路径：~/.agents/skills/loc-resume-screening/config.yaml")
+        print("❌ 找不到配置文件")
+        print("   请先复制模板并填写本机配置：")
+        print("   cd ~/.agents/skills/loc-resume-screening")
+        print("   cp config.example.yaml config.local.yaml")
+        print("   然后编辑 config.local.yaml")
         sys.exit(1)
 
     with open(config_path, "r", encoding="utf-8") as f:
@@ -72,7 +85,7 @@ def get_paths(cfg: dict) -> dict:
 
 
 def get_llm_api_key(cfg: dict) -> str:
-    """LLM apiKey：优先 config.yaml，其次环境变量，最后 openclaw.json"""
+    """LLM apiKey：优先配置文件，其次环境变量；不自动读取 OpenClaw 配额。"""
     key = cfg.get("llm", {}).get("api_key", "")
     if key:
         return key
@@ -80,25 +93,6 @@ def get_llm_api_key(cfg: dict) -> str:
     key = os.environ.get("LOC_LLM_API_KEY", "")
     if key:
         return key
-
-    # 从 openclaw.json 自动读取
-    candidates = [
-        Path.home() / ".openclaw" / "openclaw.json",
-        Path.home() / ".config" / "openclaw" / "openclaw.json",
-    ]
-    for p in candidates:
-        if not p.exists():
-            continue
-        try:
-            import json
-            data = json.loads(p.read_text())
-            providers = data.get("models", {}).get("providers", {})
-            for v in providers.values():
-                k = v.get("apiKey", "")
-                if k and len(k) > 10:
-                    return k
-        except Exception:
-            continue
     return ""
 
 
@@ -134,6 +128,6 @@ def validate_config(cfg: dict) -> list[str]:
         issues.append("test_mode.enabled=true 但 test_email 未填写")
 
     if not get_llm_api_key(cfg):
-        issues.append("LLM api_key 未配置（config.yaml / 环境变量 / openclaw.json 均未找到）")
+        issues.append("LLM api_key 未配置（请填写 config.local.yaml 的 llm.api_key，或设置 LOC_LLM_API_KEY；不会自动读取 OpenClaw 配额）")
 
     return issues

@@ -1,0 +1,55 @@
+# ============================================================
+# loc-resume-screening 配置模板
+# ============================================================
+# 说明：
+# - 本文件可提交、可打包，不应填写真实 token / 密码 / API key。
+# - 本机真实配置请复制到 config.local.yaml 后填写：
+#     cp config.example.yaml config.local.yaml
+# - 脚本读取优先级：LOC_CONFIG_PATH > config.local.yaml > config.yaml。
+# ============================================================
+
+smtp:
+  host: "smtp.example.com"            # 企业邮箱 SMTP 地址
+  port: 465
+  user: "your-email@37.com"
+  password: ""                   # 邮箱密码或授权码；不要提交真实值
+  sender_name: "Localization Team"
+  sender_email: "your-email@37.com"
+  ssl: true
+
+lark:
+  # 简历收集表（评分数据主表）
+  base_token: ""                 # 飞书 Base token
+  resume_table_id: ""            # 简历收集表 table-id
+
+  # 合同信息收集表（资源商填写银行/证件信息）
+  contract_base_token: ""        # 与简历表同 base 时可填相同值
+  contract_table_id: ""
+
+  # 合同模板表（AI 标注版模板，脚本自动从飞书下载）
+  template_base_token: ""
+  template_table_id: ""
+
+paths:
+  contract_output: "~/Documents/loc-contracts/output/"
+
+llm:
+  # provider 可选：anthropic / deepseek / openai_compatible
+  provider: "anthropic"
+  base_url: "https://ai-proxy.37wan.com/anthropic"
+  api_key: ""                    # 必须显式配置，或设置 LOC_LLM_API_KEY
+  model: "claude-sonnet-4-5-20250929"
+
+test_mode:
+  enabled: true                  # 上线前保持 true，邮件发到 test_email
+  test_email: "your-test-email@example.com"
+
+badcase_export:
+  enabled: false
+  export_dir: "~/Documents/loc-agent-badcase-exports/"
+  auto_mark_exported: false
+  local_salt: ""                 # 首次运行自动生成；不要提交真实值
+
+github:
+  repo: "<org-or-user>/<repo>"
+  token: ""                      # 优先使用 gh CLI 登录；不要提交真实 token

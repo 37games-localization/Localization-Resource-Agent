@@ -2,7 +2,7 @@
 """
 check_config.py
 ===============
-验证 config.yaml 配置是否完整，检查 SMTP/飞书/LLM 连通性。
+验证本机配置是否完整，检查 SMTP/飞书/LLM 连通性。
 VM 首次配置完后运行，确认一切正常再走 TEST_MODE。
 
 用法：
@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_loader import load_config, get_smtp, get_lark, get_llm_api_key, validate_config, is_test_mode, get_test_email
+from config_loader import load_config, get_config_path, get_smtp, get_lark, get_llm_api_key, validate_config, is_test_mode, get_test_email
 
 # ──────────────────────────────────────────────
 # 新增：基础依赖检查
@@ -96,7 +96,7 @@ def check_lark_tokens(cfg: dict) -> list[tuple[str, bool, str]]:
     else:
         results.append((
             "base_token", False,
-            "未填写 → 请在 config.yaml 的 lark.base_token 填入飞书多维表格 base token"
+            "未填写 → 请在 config.local.yaml 的 lark.base_token 填入飞书多维表格 base token"
         ))
 
     resume_table_id = lark.get("resume_table_id", "")
@@ -105,7 +105,7 @@ def check_lark_tokens(cfg: dict) -> list[tuple[str, bool, str]]:
     else:
         results.append((
             "resume_table_id", False,
-            "未填写 → 请在 config.yaml 的 lark.resume_table_id 填入简历表 table ID"
+            "未填写 → 请在 config.local.yaml 的 lark.resume_table_id 填入简历表 table ID"
         ))
 
     return results
@@ -153,13 +153,39 @@ def check_lark(cfg):
 def check_llm(cfg):
     key = get_llm_api_key(cfg)
     if not key:
-        return False, "api_key 未找到（config.yaml / 环境变量 / openclaw.json 均未配置）"
+        return False, "api_key 未配置：请填写 config.local.yaml 的 llm.api_key，或设置 LOC_LLM_API_KEY；不会自动读取 OpenClaw 配额"
     try:
-        import anthropic
+        provider = cfg.get("llm", {}).get("provider", "anthropic")
         base_url = cfg.get("llm", {}).get("base_url", "https://ai-proxy.37wan.com/anthropic")
+        model = cfg.get("llm", {}).get("model", "claude-sonnet-4-5-20250929")
+        if provider in {"deepseek", "openai_compatible"}:
+            import json
+            import ssl
+            import urllib.request
+            try:
+                import certifi
+                ssl_context = ssl.create_default_context(cafile=certifi.where())
+            except Exception:
+                ssl_context = ssl.create_default_context()
+            req = urllib.request.Request(
+                f"{base_url.rstrip('/')}/chat/completions",
+                data=json.dumps({
+                    "model": model,
+                    "messages": [{"role": "user", "content": "reply: ok"}],
+                    "max_tokens": 16,
+                    "temperature": 0,
+                }).encode("utf-8"),
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30, context=ssl_context) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+            return True, f"LLM 响应正常（{provider}: {content[:20].strip()}）"
+        import anthropic
         client = anthropic.Anthropic(base_url=base_url, api_key=key)
         msg = client.messages.create(
-            model=cfg.get("llm", {}).get("model", "claude-sonnet-4-5-20250929"),
+            model=model,
             max_tokens=16,
             messages=[{"role": "user", "content": "reply: ok"}]
         )
@@ -168,14 +194,20 @@ def check_llm(cfg):
         return False, str(e)[:120]
 
 def check_templates(cfg):
-    from config_loader import get_paths
-    tdir = Path(get_paths(cfg).get("contract_templates", "")).expanduser()
-    if not tdir.exists():
-        return False, f"模板目录不存在：{tdir}"
-    docx_files = list(tdir.glob("*.docx"))
-    if not docx_files:
-        return False, f"模板目录为空，请放入 .docx 合同模板：{tdir}"
-    return True, f"找到 {len(docx_files)} 个模板文件"
+    lark = get_lark(cfg)
+    base = lark.get("template_base_token", "")
+    table = lark.get("template_table_id", "")
+    if not base or not table:
+        return False, "lark.template_base_token / template_table_id 未填写"
+    r = subprocess.run(
+        ["lark-cli", "base", "+record-list",
+         "--base-token", base, "--table-id", table,
+         "--as", "bot", "--limit", "3", "--format", "json"],
+        capture_output=True, text=True, timeout=15
+    )
+    if r.returncode != 0:
+        return False, (r.stderr or r.stdout)[:160]
+    return True, "飞书合同模板表可访问"
 
 def check_gh_cli() -> tuple[bool, str]:
     """检查 gh CLI 是否安装且已登录"""
@@ -270,6 +302,9 @@ def main():
     print("\n📋 配置完整性")
 
     cfg = load_config()
+    active_config = get_config_path()
+    if active_config:
+        print(f"  ℹ️  当前读取配置：{active_config}")
 
     # 2a. 飞书 token 非空（硬依赖）
     token_results = check_lark_tokens(cfg)
@@ -288,36 +323,48 @@ def main():
     if issues:
         for iss in issues:
             print(f"  ❌ {iss}")
-        print("\n请先填写 config.yaml 后再运行此脚本。")
+        print("\n请先复制模板并填写本机配置后再运行此脚本：")
+        print("  cp config.example.yaml config.local.yaml")
+        print("  然后编辑 config.local.yaml")
         sys.exit(1)
-    print("  ✅ config.yaml 其余字段完整")
+    print("  ✅ 配置文件其余字段完整")
 
     # ── Section 3：SMTP 连通性 ────────────────────────────────
+    runtime_failed = False
+
     print("\n📧 SMTP 连通性")
     ok, msg = check_smtp(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
+    if not ok:
+        runtime_failed = True
 
     # ── Section 4：飞书 Base 访问 ─────────────────────────────
     print("\n🪁 飞书 Base 访问")
     ok, msg = check_lark(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
+    if not ok:
+        runtime_failed = True
 
     # ── Section 5：LLM API ────────────────────────────────────
     print("\n🤖 LLM API")
     ok, msg = check_llm(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
+    if not ok:
+        runtime_failed = True
 
     # ── Section 6：合同模板 ───────────────────────────────────
     print("\n📄 合同模板")
     ok, msg = check_templates(cfg)
     print(f"  {'✅' if ok else '❌'} {msg}")
+    if not ok:
+        runtime_failed = True
 
     # ── Section 7：TEST_MODE 提示 ─────────────────────────────
     print("\n⚙️  运行模式")
     if is_test_mode(cfg):
         te = get_test_email(cfg)
         print(f"  🟡 TEST_MODE 开启，邮件将发送至：{te}")
-        print("     确认全流程无误后，将 config.yaml 中 test_mode.enabled 改为 false")
+        print("     确认全流程无误后，将 config.local.yaml 中 test_mode.enabled 改为 false")
     else:
         print("  🟢 正式模式，邮件将发送至真实资源商")
 
@@ -330,7 +377,7 @@ def main():
         print("  🟡 badcase_export.enabled = false（未开启）")
         print()
         print("  💡 开启方法：")
-        print("     1. 在 config.yaml 中设置：")
+        print("     1. 在 config.local.yaml 中设置：")
         print("        badcase_export:")
         print("          enabled: true")
         print()
@@ -362,11 +409,17 @@ def main():
                     elif "gh CLI" in item and "未登录" in msg:
                         print("     • 登录 GitHub： gh auth login")
                     elif "github.token" in item:
-                        print("     • 在 config.yaml 配置 github.token（找 penny 获取 token）")
+                        print("     • 在 config.local.yaml 配置 github.token（找项目负责人获取 token）")
                     elif "export_dir" in item:
                         print(f"     • 检查导出目录路径权限：{msg}")
 
     print("\n" + "=" * 60)
+    if runtime_failed:
+        print("  ❌ 环境自检未完全通过，请先修复以上失败项。")
+        print("     已通过的单点能力仍可按需测试，但不要切正式环境。")
+        print("=" * 60)
+        sys.exit(1)
+
     print("  ✅ 环境自检完成，可以开始使用！")
     print("=" * 60)
 
