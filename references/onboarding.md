@@ -188,7 +188,15 @@ test_mode:
 - 「**是否Badcase**」列 → 选「⚠️ 是」
 - 「**期望结果**」列 → 写一句话（可不填）
 
-没有别的了。上下文、运行日志、评分明细由系统自动收集，每次导出后在 GitHub 自动开 issue，由项目负责人分析修复。
+没有别的了。上下文、运行日志、评分明细由系统自动收集，导出为统一协议的脱敏 snapshot JSON，并上传到飞书「Badcase快照」附件字段。GitHub issue 由项目负责人集中读取 snapshot 后创建，VM 不需要 GitHub 权限。
+
+**统一上报协议**：
+
+- VM 侧只生成 `snapshot_version=2.0` 的脱敏 JSON。
+- 不允许不同 Agent 自由拼 GitHub issue 标题和正文。
+- issue 标题、正文、label 统一由 `scripts/badcase_protocol.py` / `scripts/push_badcase_issues.py` 生成。
+- snapshot 校验失败或安全扫描命中时会跳过，不允许强行上传。
+- 禁止包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。
 
 **开启 Badcase 自动导出**：在 `config.local.yaml` 中设置：
 

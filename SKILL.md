@@ -56,7 +56,8 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `check_signed_contract.py` | 核查签字合同 → 更新飞书状态 | 「XXX的合同已签字」 |
 | `send_rejection_email.py` | 发婉拒邮件（二次确认）→ 更新飞书 | 「婉拒XXX」 |
 | `update_status.py` | 手动推进招募状态 | 「把XXX状态改成XXX」 |
-| `export_badcase_snapshots.py` | 导出 badcase 脱敏快照 → git push → GitHub issue | 「导出badcase」「推送badcase」 |
+| `export_badcase_snapshots.py` | VM 侧导出统一协议 badcase 脱敏快照并上传飞书 | 「导出badcase」「推送badcase」 |
+| `push_badcase_issues.py` | 项目侧读取脱敏 snapshot，按统一模板创建 GitHub issue | 项目负责人集中开 issue |
 | `schema_validator.py` | 生产表准入校验：表头识别、缺列/多列/类型差异、生成字段映射 | 「检查这张Lark表能不能用」「更换生产表」 |
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
 | `run_testmode_demo.py` | 真实 TEST_MODE demo 证据采集：调用现有脚本并保存 transcript/summary | 「跑一遍真实测试demo」「录制前验证」 |
@@ -243,7 +244,7 @@ git checkout main
 
 或者直接在飞书主表「是否Badcase」列选「⚠️ 是」，可选填「期望结果」一句话说明。
 
-VM 只需要做这两件事，其余上下文收集、推送 GitHub issue 由系统自动处理。
+VM 只需要做这两件事，其余上下文收集和脱敏 snapshot 生成由系统自动处理。VM 不需要 GitHub 权限。
 
 当前主表已具备 Badcase 回流三列：
 - 「是否Badcase」→ `candidate.badcase_flag`
@@ -256,8 +257,23 @@ VM 只需要做这两件事，其余上下文收集、推送 GitHub issue 由系
 
 ```bash
 python3 scripts/export_badcase_snapshots.py --dry-run  # 预览
-python3 scripts/export_badcase_snapshots.py            # 正式导出并推送
+python3 scripts/export_badcase_snapshots.py            # 正式导出并上传飞书附件
 ```
+
+项目负责人集中开 GitHub issue：
+
+```bash
+python3 scripts/push_badcase_issues.py --snapshot badcase_xxx.json --dry-run
+python3 scripts/push_badcase_issues.py --snapshot badcase_xxx.json
+```
+
+Badcase 回流必须遵守统一协议：
+
+- VM 侧只上传 `snapshot_version=2.0` 的脱敏 JSON。
+- 项目侧只允许从 snapshot 生成 issue，不允许不同 Agent 自由拼标题和正文。
+- issue 标题、正文、label 由 `scripts/badcase_protocol.py` 统一生成。
+- snapshot 校验失败或安全扫描命中时必须跳过，不允许强行上传/开 issue。
+- 禁止包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。
 
 ## 手动纠正评分
 

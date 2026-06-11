@@ -3,6 +3,7 @@
 
 import sys
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +23,15 @@ from generate_contract import (
     score_contract_template,
 )
 from workflow_engine import WorkflowEngine
+from badcase_protocol import (
+    REDACTED,
+    build_snapshot,
+    issue_body,
+    issue_labels,
+    issue_title,
+    sanitize_obj,
+    validate_snapshot,
+)
 
 
 class LarkRecordNormalizeTest(unittest.TestCase):
@@ -182,6 +192,67 @@ class ProductionGuardrailTest(unittest.TestCase):
 
         self.assertIn("candidate.contract_id", schema_text)
         self.assertIn("candidate.supplier_id", schema_text)
+
+
+class BadcaseProtocolTest(unittest.TestCase):
+    def test_snapshot_redacts_sensitive_agent_run_fields(self):
+        snapshot = build_snapshot(
+            record_id="recSensitive",
+            salt="unit-test",
+            current_status="🔍 初筛中",
+            expected_result="应该进入人工复核",
+            language_pair="zh-CN>ko",
+            services="翻译",
+            score="92",
+            tier="S",
+            ai_suggestion="优先录用",
+            score_basis="PDF 解析成功，识别到游戏本地化经验。",
+            agent_run={
+                "email": "real.person@example.com",
+                "bank_account_number": "6222021234567890123",
+                "output_summary": "Sent to real.person@example.com",
+            },
+        )
+
+        validate_snapshot(snapshot)
+        body = issue_body(snapshot)
+
+        self.assertEqual(snapshot["agent_run"]["email"], REDACTED)
+        self.assertEqual(snapshot["agent_run"]["bank_account_number"], REDACTED)
+        self.assertNotIn("real.person@example.com", json.dumps(snapshot, ensure_ascii=False))
+        self.assertNotIn("6222021234567890123", body)
+
+    def test_issue_format_is_stable(self):
+        snapshot = build_snapshot(
+            record_id="rec1",
+            salt="unit-test",
+            current_status="📋 新投递",
+            expected_result="合同应该用个人版模板",
+            language_pair="zh-CN>en",
+        )
+
+        title = issue_title(snapshot)
+        body = issue_body(snapshot)
+        labels = issue_labels(snapshot)
+
+        self.assertTrue(title.startswith("Badcase[contract]: cand_"))
+        self.assertIn("## Badcase Summary", body)
+        self.assertIn("## VM Expected Result", body)
+        self.assertIn("## Required Fix Output", body)
+        self.assertIn("badcase", labels)
+        self.assertIn("badcase:contract", labels)
+
+    def test_validate_snapshot_rejects_freeform_sensitive_payload(self):
+        bad = build_snapshot(
+            record_id="rec2",
+            salt="unit-test",
+            current_status="📋 新投递",
+            expected_result="需要复核",
+        )
+        bad["badcase"]["vm_expected_result"] = "请联系 real.person@example.com"
+
+        with self.assertRaisesRegex(ValueError, "安全扫描命中"):
+            validate_snapshot(bad)
 
 
 if __name__ == "__main__":

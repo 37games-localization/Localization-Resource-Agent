@@ -28,10 +28,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config
 from field_resolver import field_id, table_ref
 from manual_trace import log_manual_step
+from badcase_protocol import (
+    SNAPSHOT_VERSION,
+    build_snapshot as build_protocol_snapshot,
+    validate_snapshot,
+)
 
 # ── 常量 ─────────────────────────────────────────────────────────────────────
 SKILL_ROOT   = Path(__file__).parent.parent
-SNAPSHOT_VER = "1.0"
+SNAPSHOT_VER = SNAPSHOT_VERSION
 
 MAIN_BASE_TOKEN = ""
 MAIN_TABLE_ID   = ""
@@ -54,17 +59,6 @@ def _init_lark_refs():
         "ai_suggestion": field_id("candidate", "candidate.ai_suggestion"),
         "score_basis": field_id("candidate", "candidate.score_basis"),
     }
-
-# 安全扫描模式
-DANGER_PATTERNS = [
-    (r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", "邮箱地址"),
-    (r"\d{15,18}",                                           "身份证号疑似"),
-    (r"\d{16,20}",                                           "银行账号疑似"),
-    (r"BEGIN PRIVATE KEY",                                   "私钥"),
-    (r"api_key\s*[=:]\s*\S+",                               "api_key"),
-    (r"password\s*[=:]\s*\S+",                              "密码"),
-]
-
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
 
@@ -110,20 +104,6 @@ def _field_text(record: dict, field_id: str) -> str:
         return ", ".join(parts)
     return str(val) if val else ""
 
-def _scan_secrets(obj, path="root") -> list[str]:
-    hits = []
-    if isinstance(obj, str):
-        for pattern, label in DANGER_PATTERNS:
-            if re.search(pattern, obj, re.IGNORECASE):
-                hits.append(f"{path}: {label}")
-    elif isinstance(obj, dict):
-        for k, v in obj.items():
-            hits.extend(_scan_secrets(v, f"{path}.{k}"))
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            hits.extend(_scan_secrets(v, f"{path}[{i}]"))
-    return hits
-
 def _load_run_log(record_id: str) -> dict:
     cache_dir = Path.home() / ".loc-resume-cache" / "run_logs"
     if not cache_dir.exists():
@@ -168,44 +148,27 @@ def fetch_badcases() -> list[dict]:
 
 def build_snapshot(record: dict, salt: str) -> dict:
     rid = record.get("record_id", "")
-    anon = _anon_id(rid, salt)
     run_log = _load_run_log(rid)
 
-    return {
-        "snapshot_version": SNAPSHOT_VER,
-        "exported_at": _now_iso(),
-        "source": {
-            "skill": "loc-resume-screening",
-            "record_id_hash": anon,
-        },
-        "badcase": {
-            "vm_expected_result": _field_text(record, FIELDS["expected"]) or "(未填写)",
-            "current_status": _field_text(record, FIELDS["status"]),
-        },
-        "resource": {
-            "anonymous_id": anon,
-            "language_pair": _field_text(record, FIELDS["language_pair"]),
-            "services":      _field_text(record, FIELDS["services"]),
-        },
-        "assessment": {
-            "ai_score":      _field_text(record, FIELDS["score"]),
-            "score_grade":   _field_text(record, FIELDS["tier"]),
-            "ai_suggestion": _field_text(record, FIELDS["ai_suggestion"]),
-            "score_basis":   _field_text(record, FIELDS["score_basis"]),
-        },
-        "agent_run": run_log,
-        "redaction": {
-            "removed_fields": ["email", "phone", "name", "id_number", "bank_account"],
-            "contains_raw_resume": False,
-            "contains_contract_text": False,
-            "contains_payment_info": False,
-        }
-    }
+    return build_protocol_snapshot(
+        record_id=rid,
+        salt=salt,
+        current_status=_field_text(record, FIELDS["status"]),
+        expected_result=_field_text(record, FIELDS["expected"]) or "(未填写)",
+        language_pair=_field_text(record, FIELDS["language_pair"]),
+        services=_field_text(record, FIELDS["services"]),
+        score=_field_text(record, FIELDS["score"]),
+        tier=_field_text(record, FIELDS["tier"]),
+        ai_suggestion=_field_text(record, FIELDS["ai_suggestion"]),
+        score_basis=_field_text(record, FIELDS["score_basis"]),
+        agent_run=run_log,
+    )
 
 
 def upload_snapshot_to_lark(record_id: str, snap: dict, dry_run: bool, quiet: bool) -> bool:
     """把快照 JSON 写成临时文件，上传到飞书附件字段"""
-    anon = snap["resource"]["anonymous_id"]
+    validate_snapshot(snap)
+    anon = snap["resource_context"]["anonymous_id"]
     filename = f"badcase_{anon}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     content = json.dumps(snap, ensure_ascii=False, indent=2)
 
@@ -286,11 +249,10 @@ def main():
         rid = record.get("record_id", "unknown")
         snap = build_snapshot(record, salt)
 
-        hits = _scan_secrets(snap)
-        if hits:
-            print(f"⛔ 记录 {rid} 安全扫描命中，已跳过：")
-            for h in hits:
-                print(f"   · {h}")
+        try:
+            validate_snapshot(snap)
+        except Exception as e:
+            print(f"⛔ 记录 {rid} 脱敏协议校验失败，已跳过：{e}")
             continue
 
         if not args.quiet:

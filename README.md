@@ -68,10 +68,18 @@ Agent 生成脱敏快照 JSON（脱敏处理：真实姓名/邮箱/电话/证件
   ↓
 自动上传到飞书表「Badcase快照」附件字段
   ↓
-项目负责人从飞书读取快照 → GitHub 自动开 issue → 追踪修复
+项目负责人从飞书读取快照 → 按统一模板开 GitHub issue → 追踪修复
 ```
 
 VM 不需要任何 GitHub 权限，不需要写技术复盘，不需要整理截图和日志。
+
+Badcase 上报必须走统一协议：
+
+- VM 侧只上传 `snapshot_version=2.0` 的脱敏 snapshot JSON。
+- 项目侧只从 snapshot 生成 GitHub issue，不允许不同 Agent 自由拼 issue 格式。
+- issue 标题、正文、label 统一由 `scripts/badcase_protocol.py` 和 `scripts/push_badcase_issues.py` 生成。
+- snapshot 校验失败或安全扫描命中时会直接跳过。
+- 禁止包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。
 
 ---
 
@@ -141,7 +149,7 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 - ✨ 新增测试题邮件 `--prepare`：只输出可复制邮件包，不发送、不写状态。
 - 🐛 修复合同模板推荐：按账户类型、账户地区、收款币种联合打分；新增国内/海外 × 人民币/外币四象限测试集。
 - 🐛 修复合同 docx 自动打开体验：优先 WPS，失败时输出明确文件路径。
-- ✅ 验证：生产 issue 回归测试 10/10，评分引擎测试 25/25，全脚本语法检查通过。
+- ✅ 验证：生产 issue / Badcase 协议回归测试 16/16，评分引擎测试 25/25，全脚本语法检查通过。
 
 ### v2.3（2026-06-05）
 **Badcase 回流上线**
@@ -220,7 +228,8 @@ loc-resume-screening/
 │   ├── workflow_engine.py      # 过程日志/人工确认基础能力
 │   ├── schema_validator.py     # 飞书表头检查与字段映射
 │   ├── update_status.py        # 状态推进
-│   ├── export_badcase_snapshots.py  # Badcase 导出 + GitHub issue
+│   ├── export_badcase_snapshots.py  # VM 侧 Badcase 脱敏快照导出
+│   ├── push_badcase_issues.py       # 项目侧统一格式 GitHub issue 创建
 │   ├── check_config.py         # 配置验证
 │   └── field_mapping.py        # 变量↔飞书字段 ID 映射
 └── references/
