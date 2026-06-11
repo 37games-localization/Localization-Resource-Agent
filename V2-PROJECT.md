@@ -2,7 +2,7 @@
 
 > 文档维护：槐序
 > 创建：2026-06-10
-> 最后更新：2026-06-10 11:14
+> 最后更新：2026-06-10 14:05
 > 分支：`v2-workflow-viz`（稳定版保底：`main`）
 
 ---
@@ -27,6 +27,7 @@ v1 版本（`main` 分支）的资源管理 Agent 存在三个核心问题：
 - **向后兼容**：v2 脚本参数接口与 v1 完全兼容，新增参数为可选项
 - **飞书是大脑**：状态/数据全在飞书，脚本每次从表里读，不靠上下文
 - **规则确定性**：评分引擎是纯规则型，结果可预测、可测试、可断言
+- **分层验收**：原脚本是已验收业务底座；v2 先作为可视化/对话包装层逐项证明等价，再升级统一入口
 
 ---
 
@@ -196,6 +197,17 @@ assert result["base_tier"] == snapshot["base_tier"]
 | 测试体系 | 规则单元测试集 v1.0（25用例全过）| ✅ | `fe5d538` | 2026-06-10 |
 | 稳定性 | WorkflowEngine 熔断机制（连续失败≥5次强退）| ✅ | `6b491a7` | 2026-06-10 |
 | **Demo** | **全流程实跑验证（rescore 可视化完整跑通）** | ✅ | — | 2026-06-10 |
+| P0 | checkpoint 写飞书流程日志 + resume 更新 decided | ✅ | — | 2026-06-10 |
+| P0 | `run_dialog.py waiting` / `workflow_runner.py waiting` 待决策列表 | ✅ | — | 2026-06-10 |
+| P0 | SKILL.md 补「继续XXX」「有哪些在等我」触发语 | ✅ | — | 2026-06-10 |
+| Schema | Lark 表接入/迁移准入底座：required schema、表头识别、差异校验、映射生成 | ✅ | — | 2026-06-10 |
+| P0 | checkpoint 语义修正：`run_id` 保持 workflow run，token 写入 `output_summary` 元数据 | ✅ | — | 2026-06-10 |
+| P0 | 工作流日志写入优先使用字段映射，缺映射时回退旧字段名 | ✅ | — | 2026-06-10 |
+| Schema | 允许 VM 确认后自动创建 `Agent流程日志` 辅助表，并让运行时优先使用映射表引用 | ✅ | — | 2026-06-10 |
+| Schema | `schema_gate.py` 生产运行门禁：正式环境未通过字段映射准入时阻止业务执行 | ✅ | — | 2026-06-10 |
+| Demo | `run_testmode_demo.py` 真实 TEST_MODE 证据采集器：保存 summary/transcript/stdout | ✅ | — | 2026-06-10 |
+| 收敛 | `integration_readiness.py` 分步骤集成验收，只读检查 v2 包装是否可进入生产验证 | ✅ | — | 2026-06-10 |
+| 收敛 | 新增 `references/integration-validation-plan.md`，明确先单步骤等价验收，再前端只读看板，最后启用统一入口 | ✅ | — | 2026-06-10 |
 | Layer 2 | Agent 行为评测框架设计 | 📅 待规划 | — | — |
 
 ### 已记录问题（issues/）
@@ -239,24 +251,44 @@ git log --oneline
 
 > 按优先级排列，dialog-driver 子 agent 完成后依次推进
 
-### 🔴 P0 — dialog-driver 完成后立即做
+### 🟠 当前收敛路线 — 先分步骤验收，再统一入口
 
-- [ ] **checkpoint 持久化写飞书**（2026-06-10 确认方案）
-  - 脚本跑到 dialog checkpoint 时，把 token 写入**流程日志表**一行（status=waiting, token=xxx）
+- [x] 新增只读集成验收脚本：`python3 scripts/integration_readiness.py`
+- [x] 明确 v2 不推翻原脚本：原脚本继续作为业务底座，v2 只做可视化/对话包装
+- [ ] VM 生产表单步骤验收：评分写回
+- [ ] VM 生产表单步骤验收：测试题邮件
+- [ ] VM 生产表单步骤验收：合同 dry-run
+- [ ] 基于 Lark 流程日志建设前端只读看板
+- [ ] 三个单步骤稳定后，再把 `workflow_runner.py next` 作为默认调度入口
+
+### 🔴 P0 — dialog-driver 完成后立即做（已完成，待生产实表验收）
+
+- [x] **checkpoint 持久化写飞书**（2026-06-10 确认方案）
+  - 脚本跑到 dialog checkpoint 时，写入**流程日志表**一行（status=waiting）
+  - `run_id` 保持本次 workflow run ID；`checkpoint_token` 写入 `output_summary` JSON，避免破坏同一执行实例的追踪
+  - 同时写入 `candidate_record_id`，供后续前端看板按候选人记录聚合日志
   - resume 完成后更新该行 status=decided
   - VM 触发时说「继续李全鸿 record_id=recXXX」→ 我先查流程日志有无 status=waiting 行，有则直接 resume
   - 触发语：「有哪些候选人在等我决策」→ 查流程日志表 status=waiting 的行列出来
   - **设计原则**：复用已有流程日志表（tblVQvjpJw9CO0kU），零新增字段，与原始 Agent 设计完全对齐
   - **原始设计基础**：流程日志表本就记录每步输入输出，VM 触发时提供 record_id，状态从飞书读不靠上下文
 
-- [ ] **SKILL.md 补充「继续XXX」「有哪些在等我」触发语**
+- [x] **SKILL.md 补充「继续XXX」「有哪些在等我」触发语**
 
 - [ ] **端到端对话 demo 验证**：完整跑一次「帮我处理李全鸿」→ checkpoint → 「写入」→ 完成
+
+已完成本地验证：
+- `python3 -m py_compile scripts/workflow_engine.py scripts/workflow_runner.py scripts/run_dialog.py`
+- `python3 tests/run_tests.py`：25/25 PASS
+- `python3 scripts/run_dialog.py resume --token ckpt-nonexistent --decision 写入`：错误路径返回 JSON
 
 ### 🟡 P1 — demo 录制前
 
 - [ ] **填写 SMTP 配置**（smtp.user / smtp.password）——发测试题步骤依赖
 - [ ] **填写 contract_table_id**——合同步骤依赖
+- [ ] **生产表准入校验**：先运行 `python3 scripts/schema_validator.py --table all` 预览差异；VM 确认后运行 `python3 scripts/schema_validator.py --table all --apply --create-missing-tables`，补字段、必要时创建 `Agent流程日志`，并生成 `config/lark-field-mapping.yaml`
+- [x] **生产运行门禁**：`test_mode.enabled=false` 或 `LOC_REQUIRE_SCHEMA_READY=1` 时，业务入口会先检查字段映射完整性；未通过则阻止执行并提示准入命令
+- [x] **TEST_MODE demo 证据采集器**：`run_testmode_demo.py` 调用真实业务脚本并保存 summary/transcript/stdout
 - [ ] **录制全流程 demo**（评分 → 确认 → 写入飞书，在对话框里完成，不碰命令行）
 
 ### 🟢 P2 — 稳定后
@@ -265,3 +297,4 @@ git log --oneline
 - [ ] **Layer 2 Agent 行为评测框架**（任务完成率 / 工具调用准确率 / 成本）
 - [ ] **v2 合并到 main**（所有测试通过后）
 - [ ] **其余脚本接入 WorkflowEngine**（check_signed_contract / send_rejection_email / update_status）
+- [ ] **业务脚本迁移到 field_resolver.py**：逐步替换硬编码 field_id，改为读取 `config/lark-field-mapping.yaml`

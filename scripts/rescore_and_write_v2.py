@@ -73,6 +73,7 @@ def process_one(
 
     wf = WorkflowEngine(
         candidate_name=name,
+        candidate_record_id=rid,
         write_lark=write_lark_log,
     )
     # 覆盖 run_id 前缀让日志更好读

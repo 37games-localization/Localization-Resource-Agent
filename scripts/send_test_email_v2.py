@@ -174,6 +174,7 @@ def main():
     # ── 初始化 WorkflowEngine ─────────────────────────────────────────────────
     wf = WorkflowEngine(
         candidate_name=name,
+        candidate_record_id=target["record_id"],
         write_lark=not args.no_lark_log,
     )
     wf.run_id = f"test-email-{target['record_id'][:8]}-{int(time.time())}"

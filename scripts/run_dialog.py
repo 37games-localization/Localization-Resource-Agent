@@ -29,6 +29,7 @@ SCRIPTS_DIR = Path(__file__).parent
 SKILL_DIR   = SCRIPTS_DIR.parent
 
 sys.path.insert(0, str(SCRIPTS_DIR))
+from schema_gate import assert_schema_ready
 
 # ── 工具：结构化输出 ──────────────────────────────────────────────────────────
 
@@ -53,6 +54,15 @@ def emit_done(candidate: str, message: str, raw_output: str = ""):
         "message":    message,
         "raw_output": raw_output[:2000],
     })
+
+
+def ensure_schema_ready(operation: str) -> bool:
+    try:
+        assert_schema_ready(operation)
+        return True
+    except Exception as e:
+        emit_error(str(e))
+        return False
 
 
 # ── 解析工具 ──────────────────────────────────────────────────────────────────
@@ -145,6 +155,8 @@ def cmd_score(args):
     if not args.name and not args.record_id:
         emit_error("请提供 --name 或 --record-id")
         return
+    if not ensure_schema_ready("score"):
+        return
 
     # 如果提供了姓名，先查 record_id（rescore_and_write_v2.py 只支持 --record-id）
     record_id = args.record_id
@@ -168,6 +180,8 @@ def cmd_test_email(args):
     """调用 send_test_email_v2.py（如存在 dialog 支持），否则直接运行"""
     if not args.name and not args.record_id:
         emit_error("请提供 --name 或 --record-id")
+        return
+    if not ensure_schema_ready("test-email"):
         return
     if not args.file:
         emit_error("发测试题需要 --file 参数（测试题 PDF 路径）")
@@ -207,6 +221,8 @@ def cmd_contract(args):
     if not args.name and not args.record_id:
         emit_error("请提供 --name 或 --record-id")
         return
+    if not ensure_schema_ready("contract"):
+        return
 
     script = SCRIPTS_DIR / "generate_contract_v2.py"
     if not script.exists():
@@ -241,6 +257,8 @@ def cmd_resume(args):
     """
     if not args.token:
         emit_error("请提供 --token（格式：ckpt-xxx）")
+        return
+    if not ensure_schema_ready("resume"):
         return
     if not args.decision:
         emit_error("请提供 --decision（如 '写入' 或 '跳过'）")
@@ -315,6 +333,25 @@ def cmd_resume(args):
                 message=f"决策「{decision}」已写入，后台任务处理中（可能需要几秒完成）",
                 raw_output=raw,
             )
+
+
+def cmd_waiting(args):
+    """列出流程日志表中等待人工决策的 checkpoint"""
+    if not ensure_schema_ready("waiting"):
+        return
+    try:
+        from workflow_runner import fetch_waiting_checkpoints
+        rows = fetch_waiting_checkpoints(limit=args.limit)
+    except Exception as e:
+        emit_error(f"读取待决策列表失败：{e}")
+        return
+
+    emit({
+        "status": "done",
+        "candidate": "",
+        "message": f"当前有 {len(rows)} 条待决策记录" if rows else "当前没有等待人工决策的候选人",
+        "waiting": rows,
+    })
 
 
 # ── 核心执行函数 ──────────────────────────────────────────────────────────────
@@ -516,6 +553,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_resume.add_argument("--token",    required=True, help="checkpoint token（格式：ckpt-xxx）")
     p_resume.add_argument("--decision", required=True, help="决策内容（如 '写入' 或 '跳过'）")
 
+    # waiting
+    p_waiting = sub.add_parser("waiting", help="列出等待人工决策的 checkpoint")
+    p_waiting.add_argument("--limit", type=int, default=50, help="最多读取多少条")
+
     return parser
 
 
@@ -524,6 +565,7 @@ COMMAND_MAP = {
     "test-email": cmd_test_email,
     "contract":   cmd_contract,
     "resume":     cmd_resume,
+    "waiting":    cmd_waiting,
 }
 
 

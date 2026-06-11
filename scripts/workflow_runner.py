@@ -44,6 +44,14 @@ from send_test_email import (
     lark_cli, extract_text, BASE_TOKEN, TABLE_ID,
 )
 from rescore_and_write import fetch_all_records
+from config_loader import load_config, get_lark
+from schema_gate import assert_schema_ready
+try:
+    from field_resolver import load_field_mapping, get_table_mapping, table_ref
+except Exception:
+    load_field_mapping = None
+    get_table_mapping = None
+    table_ref = None
 
 # ── 招募状态常量 ──────────────────────────────────────────────────────────────
 STATUS_LABELS = [
@@ -128,6 +136,150 @@ def run_script(script_name: str, extra_args: list = None):
     return result.returncode
 
 
+def ensure_schema_ready(operation: str) -> bool:
+    try:
+        assert_schema_ready(operation)
+        return True
+    except Exception as e:
+        print(f"❌ {e}")
+        return False
+
+
+def _extract_lark_records(payload):
+    """兼容 lark-cli record-list 的不同 JSON 包装格式"""
+    data = payload.get("data", payload)
+    for key in ("items", "records", "record_list"):
+        if isinstance(data, dict) and isinstance(data.get(key), list):
+            return data[key]
+    if isinstance(payload.get("items"), list):
+        return payload["items"]
+    return []
+
+
+WORKFLOW_FIELD_FALLBACKS = {
+    "workflow.run_id": "run_id",
+    "workflow.candidate_record_id": "candidate_record_id",
+    "workflow.candidate_name": "candidate_name",
+    "workflow.step_name": "step_name",
+    "workflow.status": "status",
+    "workflow.input_summary": "input_summary",
+    "workflow.output_summary": "output_summary",
+    "workflow.created_at": "created_at",
+}
+
+
+def _workflow_log_mapping() -> dict:
+    if not load_field_mapping or not get_table_mapping:
+        return {}
+    try:
+        return get_table_mapping("workflow_log", load_field_mapping())
+    except Exception:
+        return {}
+
+
+def _workflow_field_ref(logical_key: str, mapping: dict) -> str:
+    field = (mapping.get("fields") or {}).get(logical_key) or {}
+    return field.get("field_id") or field.get("field_name") or WORKFLOW_FIELD_FALLBACKS[logical_key]
+
+
+def _workflow_field_value(fields: dict, logical_key: str, mapping: dict):
+    field = (mapping.get("fields") or {}).get(logical_key) or {}
+    candidates = [
+        field.get("field_id"),
+        field.get("field_name"),
+        field.get("expected_name"),
+        WORKFLOW_FIELD_FALLBACKS[logical_key],
+    ]
+    for key in candidates:
+        if key and key in fields:
+            return fields.get(key)
+    return ""
+
+
+def _checkpoint_token_from_fields(fields: dict, mapping: dict) -> str:
+    output_summary = _workflow_field_value(fields, "workflow.output_summary", mapping)
+    if isinstance(output_summary, str) and output_summary:
+        try:
+            payload = json.loads(output_summary)
+            token = payload.get("checkpoint_token", "")
+            if token:
+                return token
+        except Exception:
+            pass
+
+    legacy_run_id = _workflow_field_value(fields, "workflow.run_id", mapping)
+    if isinstance(legacy_run_id, str) and legacy_run_id.startswith("ckpt-"):
+        return legacy_run_id
+    return ""
+
+
+def fetch_waiting_checkpoints(limit: int = 50) -> list[dict]:
+    """从流程日志表读取 status=waiting 的 checkpoint 行"""
+    cfg = load_config()
+    lark = get_lark(cfg)
+    base_token = lark.get("base_token", "")
+    log_table_id = lark.get("log_table_id", "tblVQvjpJw9CO0kU")
+    if table_ref:
+        try:
+            mapped_base, mapped_table = table_ref("workflow_log")
+            base_token = mapped_base or base_token
+            log_table_id = mapped_table or log_table_id
+        except Exception:
+            pass
+    if not base_token:
+        raise RuntimeError("lark.base_token 未配置")
+
+    mapping = _workflow_log_mapping()
+    status_field = _workflow_field_ref("workflow.status", mapping)
+    filter_json = json.dumps({
+        "logic": "and",
+        "conditions": [[status_field, "==", "waiting"]],
+    }, ensure_ascii=False)
+    field_refs = [
+        _workflow_field_ref("workflow.run_id", mapping),
+        _workflow_field_ref("workflow.candidate_record_id", mapping),
+        _workflow_field_ref("workflow.step_name", mapping),
+        _workflow_field_ref("workflow.status", mapping),
+        _workflow_field_ref("workflow.candidate_name", mapping),
+        _workflow_field_ref("workflow.input_summary", mapping),
+        _workflow_field_ref("workflow.output_summary", mapping),
+        _workflow_field_ref("workflow.created_at", mapping),
+    ]
+    cmd = [
+        "lark-cli", "base", "+record-list",
+        "--base-token", base_token,
+        "--table-id", log_table_id,
+    ]
+    for ref in dict.fromkeys(field_refs):
+        cmd += ["--field-id", ref]
+    cmd += [
+        "--filter-json", filter_json,
+        "--limit", str(limit),
+        "--format", "json",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout).strip())
+
+    payload = json.loads(result.stdout or "{}")
+    rows = []
+    for item in _extract_lark_records(payload):
+        fields = item.get("fields", item)
+        token = _checkpoint_token_from_fields(fields, mapping)
+        rows.append({
+            "record_id": item.get("record_id", item.get("id", "")),
+            "token": token,
+            "run_id": _workflow_field_value(fields, "workflow.run_id", mapping),
+            "candidate_record_id": _workflow_field_value(fields, "workflow.candidate_record_id", mapping),
+            "step_name": _workflow_field_value(fields, "workflow.step_name", mapping),
+            "status": _workflow_field_value(fields, "workflow.status", mapping),
+            "candidate_name": _workflow_field_value(fields, "workflow.candidate_name", mapping),
+            "input_summary": _workflow_field_value(fields, "workflow.input_summary", mapping),
+            "created_at": _workflow_field_value(fields, "workflow.created_at", mapping),
+        })
+    return rows
+
+
 # ── 子命令实现 ────────────────────────────────────────────────────────────────
 
 def cmd_status(args):
@@ -178,12 +330,16 @@ def cmd_next(args):
 
     # ── 根据状态决定调用哪个脚本 ────────────────────────────────────────────
     if status in ("📋 简历待筛选", "🔍 初筛中", "✅ 初筛通过"):
+        if not ensure_schema_ready("score"):
+            return 1
         return run_script("rescore_and_write_v2.py", [
             "--record-id", record_id,
             "--interactive",
         ])
 
     elif status == "📝 测试题待发":
+        if not ensure_schema_ready("test-email"):
+            return 1
         if not args.file:
             print("⚠️  发测试题需要 --file 参数（测试题 PDF 路径）")
             print("   示例：python3 scripts/workflow_runner.py next"
@@ -195,6 +351,8 @@ def cmd_next(args):
         ])
 
     elif status in ("✅ 测试通过", "📄 合同待生成"):
+        if not ensure_schema_ready("contract"):
+            return 1
         return run_script("generate_contract_v2.py", [
             "--record-id", record_id,
         ])
@@ -210,6 +368,8 @@ def cmd_score(args):
     """手动触发评分写回"""
     if not args.name and not args.record_id:
         print("❌ 请提供 --name 或 --record-id")
+        return 1
+    if not ensure_schema_ready("score"):
         return 1
 
     extra = []
@@ -230,6 +390,8 @@ def cmd_test_email(args):
     if not args.file:
         print("❌ 请提供 --file（测试题 PDF 路径）")
         return 1
+    if not ensure_schema_ready("test-email"):
+        return 1
 
     extra = []
     if args.record_id:
@@ -246,6 +408,8 @@ def cmd_contract(args):
     if not args.name and not args.record_id:
         print("❌ 请提供 --name 或 --record-id")
         return 1
+    if not ensure_schema_ready("contract"):
+        return 1
 
     extra = []
     if args.record_id:
@@ -260,6 +424,8 @@ def cmd_resume(args):
     """从 dialog checkpoint 恢复执行"""
     if not args.token:
         print("❌ 请提供 --token（checkpoint token，格式：ckpt-xxx）")
+        return 1
+    if not ensure_schema_ready("resume"):
         return 1
     if not args.decision:
         print("❌ 请提供 --decision（决策内容，如 '写入' 或 '跳过'）")
@@ -300,6 +466,35 @@ def cmd_list(args):
     return 0
 
 
+def cmd_waiting(args):
+    """列出等待人工决策的 checkpoint"""
+    if not ensure_schema_ready("waiting"):
+        return 1
+    try:
+        rows = fetch_waiting_checkpoints(limit=args.limit)
+    except Exception as e:
+        print(f"❌ 读取待决策列表失败：{e}")
+        return 1
+
+    if not rows:
+        print("\n当前没有等待人工决策的候选人。\n")
+        return 0
+
+    header = f"{'#':<4} {'token':<42} {'候选人':<16} {'节点':<20} {'状态'}"
+    print(f"\n{header}")
+    print("─" * 100)
+    for i, row in enumerate(rows, 1):
+        print(
+            f"{i:<4} {str(row['token'] or '—'):<42} "
+            f"{str(row['candidate_name'] or '—'):<16} "
+            f"{str(row['step_name'] or '—'):<20} "
+            f"{row['status'] or 'waiting'}"
+        )
+    print(f"\n共 {len(rows)} 条待决策记录。继续处理时使用：")
+    print('python3 scripts/workflow_runner.py resume --token <token> --decision "写入"\n')
+    return 0
+
+
 # ── 参数解析 ──────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -317,6 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
   contract    python3 scripts/workflow_runner.py contract --name "青木遥"
   resume      python3 scripts/workflow_runner.py resume --token ckpt-xxx --decision "写入"
   list        python3 scripts/workflow_runner.py list
+  waiting     python3 scripts/workflow_runner.py waiting
 
 招募状态链（16 节点）：
   📋 简历待筛选 → 🔍 初筛中 → ✅ 初筛通过 / ❌ 已拒绝
@@ -365,6 +561,10 @@ def build_parser() -> argparse.ArgumentParser:
     # ── list ─────────────────────────────────────────────────────────────────
     sub.add_parser("list", help="列出所有候选人及当前招募状态")
 
+    # ── waiting ──────────────────────────────────────────────────────────────
+    p_waiting = sub.add_parser("waiting", help="列出等待人工决策的 checkpoint")
+    p_waiting.add_argument("--limit", type=int, default=50, help="最多读取多少条")
+
     return parser
 
 
@@ -378,6 +578,7 @@ COMMAND_MAP = {
     "contract":   cmd_contract,
     "resume":     cmd_resume,
     "list":       cmd_list,
+    "waiting":    cmd_waiting,
 }
 
 

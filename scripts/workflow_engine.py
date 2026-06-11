@@ -26,6 +26,12 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_lark
+try:
+    from field_resolver import load_field_mapping, get_table_mapping, table_ref
+except Exception:
+    load_field_mapping = None
+    get_table_mapping = None
+    table_ref = None
 
 # ── 步骤类型 ──────────────────────────────────────────────────────────────────
 class StepType:
@@ -70,6 +76,7 @@ class WorkflowStep:
         step_type: str = StepType.ACTION,
         input_summary: str = "",
         candidate_name: str = "",
+        candidate_record_id: str = "",
     ):
         self.step_id       = str(uuid.uuid4())[:8]
         self.run_id        = run_id
@@ -80,6 +87,7 @@ class WorkflowStep:
         self.status        = StepStatus.RUNNING
         self.decision      = ""
         self.candidate_name= candidate_name
+        self.candidate_record_id = candidate_record_id
         self.created_at    = datetime.now().isoformat()
         self.updated_at    = self.created_at
         self._start_ts     = time.time()
@@ -97,6 +105,7 @@ class WorkflowStep:
         """转为飞书多维表格写入格式（裸 Map）"""
         return {
             "run_id":          self.run_id,
+            "candidate_record_id": self.candidate_record_id,
             "step_name":       self.step_name,
             "step_type":       self.step_type,
             "input_summary":   self.input_summary[:500],   # 飞书文本长度限制
@@ -105,6 +114,21 @@ class WorkflowStep:
             "decision":        self.decision,
             "candidate_name":  self.candidate_name,
             "created_at":      int(datetime.fromisoformat(self.created_at).timestamp() * 1000),
+        }
+
+    def to_logical_record(self) -> dict:
+        """转为 schema_validator.py 使用的逻辑字段键格式。"""
+        return {
+            "workflow.run_id":              self.run_id,
+            "workflow.candidate_record_id": self.candidate_record_id,
+            "workflow.candidate_name":      self.candidate_name,
+            "workflow.step_name":           self.step_name,
+            "workflow.step_type":           self.step_type,
+            "workflow.status":              self.status,
+            "workflow.input_summary":       self.input_summary[:500],
+            "workflow.output_summary":      self.output_summary[:500],
+            "workflow.decision":            self.decision,
+            "workflow.created_at":          int(datetime.fromisoformat(self.created_at).timestamp() * 1000),
         }
 
 
@@ -130,11 +154,13 @@ class WorkflowEngine:
         self,
         candidate_name: str = "",
         run_id: str = None,
+        candidate_record_id: str = "",
         silent: bool = False,
         write_lark: bool = True,
         max_failures: int = 5,
     ):
         self.candidate_name = candidate_name
+        self.candidate_record_id = candidate_record_id
         self.run_id         = run_id or f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{str(uuid.uuid4())[:6]}"
         self.silent         = silent        # True = 不打印终端输出
         self.write_lark     = write_lark    # True = 写飞书日志表
@@ -152,6 +178,7 @@ class WorkflowEngine:
         except Exception:
             self._lark_base   = ""
             self._lark_log_tbl= "tblVQvjpJw9CO0kU"
+        self._apply_workflow_table_mapping()
 
         self._print_header()
 
@@ -185,22 +212,121 @@ class WorkflowEngine:
 
     # ── 飞书写入 ───────────────────────────────────────────────────────────────
 
-    def _write_log_to_lark(self, step: WorkflowStep):
-        """把步骤写入飞书流程日志表，失败不中断流程"""
+    def _write_log_to_lark(self, step: WorkflowStep) -> str:
+        """把步骤写入飞书流程日志表，失败不中断流程；成功时返回 record_id"""
+        self._ensure_lark_config()
         if not self.write_lark or not self._lark_base:
-            return
+            return ""
         try:
-            record = step.to_lark_record()
+            record = self._map_workflow_record(step.to_logical_record(), step.to_lark_record())
             cmd = [
-                "lark-cli", "base", "+record-create",
+                "lark-cli", "base", "+record-upsert",
                 "--base-token", self._lark_base,
                 "--table-id",   self._lark_log_tbl,
-                "--fields",     json.dumps(record, ensure_ascii=False),
+                "--json",       json.dumps(record, ensure_ascii=False),
                 "--format",     "json",
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                return ""
+            try:
+                payload = json.loads(result.stdout or "{}")
+            except Exception:
+                return ""
+            data = payload.get("data", payload)
+            record_id = (
+                data.get("record_id")
+                or data.get("record", {}).get("record_id")
+                or data.get("record", {}).get("id")
+                or data.get("id", "")
+            )
+            return record_id or ""
+        except Exception:
+            return ""  # 日志写失败不影响主流程
+
+    def _map_workflow_record(self, logical_record: dict, fallback_record: dict) -> dict:
+        """优先用 lark-field-mapping.yaml 的字段 ID；缺映射时回退旧字段名。"""
+        if not load_field_mapping or not get_table_mapping:
+            return fallback_record
+        try:
+            mapping = load_field_mapping()
+            table = get_table_mapping("workflow_log", mapping)
+            fields = table.get("fields") or {}
+            if not fields:
+                return fallback_record
+            mapped = {}
+            for logical_key, value in logical_record.items():
+                field = fields.get(logical_key) or {}
+                target = field.get("field_id") or field.get("field_name")
+                if target:
+                    mapped[target] = value
+            return mapped or fallback_record
+        except Exception:
+            return fallback_record
+
+    def _map_workflow_patch(self, logical_patch: dict, fallback_patch: dict) -> dict:
+        return self._map_workflow_record(logical_patch, fallback_patch)
+
+    def _update_log_decision(self, checkpoint_token: str, record_id: str, decision: str):
+        """把 dialog checkpoint 对应的飞书日志行更新为 decided"""
+        self._ensure_lark_config()
+        if not self.write_lark or not self._lark_base or not record_id:
+            return
+        try:
+            fallback_patch = {
+                "status": StepStatus.DECIDED,
+                "decision": decision,
+                "output_summary": json.dumps(
+                    {"checkpoint_token": checkpoint_token, "decision": decision},
+                    ensure_ascii=False,
+                ),
+            }
+            patch = self._map_workflow_patch(
+                {
+                    "workflow.status": StepStatus.DECIDED,
+                    "workflow.decision": decision,
+                    "workflow.output_summary": fallback_patch["output_summary"],
+                },
+                fallback_patch,
+            )
+            cmd = [
+                "lark-cli", "base", "+record-upsert",
+                "--base-token", self._lark_base,
+                "--table-id", self._lark_log_tbl,
+                "--record-id", record_id,
+                "--json", json.dumps(patch, ensure_ascii=False),
+                "--format", "json",
             ]
             subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         except Exception:
-            pass  # 日志写失败不影响主流程
+            pass
+
+    def _ensure_lark_config(self):
+        """兼容 WorkflowEngine.__new__() 创建的轻量 resume 实例"""
+        if hasattr(self, "write_lark") and hasattr(self, "_lark_base") and hasattr(self, "_lark_log_tbl"):
+            return
+        self.write_lark = getattr(self, "write_lark", True)
+        try:
+            cfg = load_config()
+            lark = get_lark(cfg)
+            self._lark_base = lark.get("base_token", "")
+            self._lark_log_tbl = lark.get("log_table_id", "tblVQvjpJw9CO0kU")
+        except Exception:
+            self._lark_base = ""
+            self._lark_log_tbl = "tblVQvjpJw9CO0kU"
+        self._apply_workflow_table_mapping()
+
+    def _apply_workflow_table_mapping(self):
+        """若字段映射包含 workflow_log 表引用，优先使用映射中的 base/table。"""
+        if not table_ref:
+            return
+        try:
+            base_token, table_id = table_ref("workflow_log")
+            if base_token and table_id:
+                self._lark_base = base_token
+                self._lark_log_tbl = table_id
+        except Exception:
+            pass
 
     # ── 核心接口 ───────────────────────────────────────────────────────────────
 
@@ -222,6 +348,7 @@ class WorkflowEngine:
             step_type=StepType.ACTION,
             input_summary=input_summary,
             candidate_name=self.candidate_name,
+            candidate_record_id=getattr(self, "candidate_record_id", ""),
         )
         step.finish(output_summary=output_summary, status=status)
         self.steps.append(step)
@@ -269,16 +396,17 @@ class WorkflowEngine:
             step_type=StepType.CHECKPOINT,
             input_summary=json.dumps(context or {}, ensure_ascii=False)[:300],
             candidate_name=self.candidate_name,
+            candidate_record_id=getattr(self, "candidate_record_id", ""),
         )
         step.status = StepStatus.WAITING
         self.steps.append(step)
         self._pending_checkpoint = step
 
-        self._write_log_to_lark(step)
-
         # ── dialog 模式：异步，不阻塞 ──────────────────────────────────────────
         if mode == "dialog":
             return self._checkpoint_dialog(node, context, prompt, options, step)
+
+        self._write_log_to_lark(step)
 
         # ── cli 模式：打印暂停信息 ──────────────────────────────────────────────
         if not self.silent:
@@ -308,6 +436,7 @@ class WorkflowEngine:
             step_type=StepType.DECISION,
             input_summary=f"选项：{decision}",
             candidate_name=self.candidate_name,
+            candidate_record_id=getattr(self, "candidate_record_id", ""),
         )
         dec_step.finish(output_summary=decision, status=StepStatus.DECIDED)
         self.steps.append(dec_step)
@@ -339,15 +468,27 @@ class WorkflowEngine:
         """
         # 生成唯一 token
         checkpoint_token = f"ckpt-{self.run_id}-{step.step_id}"
+        step.output_summary = json.dumps(
+            {
+                "checkpoint_token": checkpoint_token,
+                "prompt": prompt,
+                "options": options or [],
+            },
+            ensure_ascii=False,
+        )
 
         # 确保目录存在
         ckpt_dir = Path.home() / ".loc-resume-checkpoints"
         ckpt_dir.mkdir(parents=True, exist_ok=True)
 
+        lark_record_id = self._write_log_to_lark(step)
+
         # 构建 checkpoint 数据
         ckpt_data = {
             "token":      checkpoint_token,
             "run_id":     self.run_id,
+            "candidate_record_id": getattr(self, "candidate_record_id", ""),
+            "lark_record_id": lark_record_id,
             "node":       node,
             "context":    context or {},
             "prompt":     prompt,
@@ -401,6 +542,11 @@ class WorkflowEngine:
 
         ckpt_data["status"]   = "decided"
         ckpt_data["decision"] = decision
+        self._update_log_decision(
+            checkpoint_token=checkpoint_token,
+            record_id=ckpt_data.get("lark_record_id", ""),
+            decision=decision,
+        )
         ckpt_file.write_text(
             json.dumps(ckpt_data, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -463,6 +609,7 @@ class WorkflowEngine:
             step_type=StepType.ERROR,
             input_summary=input_summary,
             candidate_name=self.candidate_name,
+            candidate_record_id=getattr(self, "candidate_record_id", ""),
         )
         step.finish(output_summary=error_msg, status=StepStatus.FAILED)
         self.steps.append(step)
@@ -542,6 +689,7 @@ class StepContext:
             step_type=StepType.ACTION,
             input_summary=input_summary,
             candidate_name=engine.candidate_name,
+            candidate_record_id=getattr(engine, "candidate_record_id", ""),
         )
         # 进入时打印 running 状态
         if not engine.silent:

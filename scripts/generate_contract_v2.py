@@ -88,6 +88,7 @@ def main():
     # ── 初始化 WorkflowEngine ─────────────────────────────────────────────────
     wf = WorkflowEngine(
         candidate_name=name,
+        candidate_record_id=target["record_id"],
         write_lark=not args.no_lark_log,
     )
     wf.run_id = f"contract-{target['record_id'][:8]}-{int(time.time())}"
@@ -128,7 +129,11 @@ def main():
 
     # ── Step 4: 选择合同模板 ──────────────────────────────────────────────────
     with wf.step("匹配合同模板", input_summary=f"候选人字段匹配") as s:
-        template_rec, template_name = pick_template_for_candidate(template_records, fields)
+        template_rec, template_name = pick_template_for_candidate(
+            template_records,
+            fields,
+            auto_confirm=args.yes,
+        )
         if not template_rec:
             s.finish(output="❌ 未选择模板", status=StepStatus.FAILED)
             print("❌ 未选择模板，退出"); sys.exit(1)
