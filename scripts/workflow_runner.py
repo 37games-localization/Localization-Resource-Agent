@@ -136,6 +136,58 @@ def run_script(script_name: str, extra_args: list = None):
     return result.returncode
 
 
+PARSED_FIELD_CANDIDATES = {
+    "word_count": ("解析字数", "candidate.parsed_word_count"),
+    "years": ("解析年限", "candidate.parsed_years"),
+    "project_count": ("解析项目数", "candidate.parsed_project_count"),
+    "parsed_at": ("简历解析时间", "candidate.resume_parsed_at"),
+}
+
+
+def _candidate_field(fields: dict, *keys: str):
+    for key in keys:
+        if not key:
+            continue
+        if key in fields:
+            return fields.get(key)
+        if "." in key and load_field_mapping and get_table_mapping:
+            try:
+                mapping = get_table_mapping("candidate", load_field_mapping())
+                field = (mapping.get("fields") or {}).get(key) or {}
+                for mapped_key in (field.get("field_id"), field.get("field_name"), field.get("expected_name")):
+                    if mapped_key and mapped_key in fields:
+                        return fields.get(mapped_key)
+            except Exception:
+                pass
+    return None
+
+
+def parsed_resume_ready(record: dict) -> bool:
+    """评分前必须能在 Lark 行里看到解析事实，避免 transient PDF 影响评分可审计性。"""
+    fields = record.get("fields", {})
+    parsed_at = _candidate_field(fields, *PARSED_FIELD_CANDIDATES["parsed_at"])
+    if parsed_at:
+        return True
+    word_count = _candidate_field(fields, *PARSED_FIELD_CANDIDATES["word_count"])
+    years = _candidate_field(fields, *PARSED_FIELD_CANDIDATES["years"])
+    project_count = _candidate_field(fields, *PARSED_FIELD_CANDIDATES["project_count"])
+    return any(value not in (None, "") for value in (word_count, years, project_count))
+
+
+def ensure_resume_parsed(record: dict) -> bool:
+    """If parsed facts are missing, run the parser first and require it to succeed."""
+    if parsed_resume_ready(record):
+        return True
+    record_id = record.get("record_id", "")
+    name = extract_text(record.get("fields", {}).get(FLD_NAME, "")) or record_id
+    print("\n📄 评分前未发现持久化简历解析字段，先执行解析并写回 Lark。")
+    rc = run_script("parse_resumes.py", ["--record-id", record_id])
+    if rc != 0:
+        print(f"❌ {name} 的简历解析未完成，停止评分。请先修复 LLM/API/附件后重试。")
+        return False
+    return True
+
+
 def ensure_schema_ready(operation: str) -> bool:
     try:
         assert_schema_ready(operation)
@@ -332,6 +384,8 @@ def cmd_next(args):
     if status in ("📋 简历待筛选", "🔍 初筛中", "✅ 初筛通过"):
         if not ensure_schema_ready("score"):
             return 1
+        if not ensure_resume_parsed(rec):
+            return 1
         return run_script("rescore_and_write_v2.py", [
             "--record-id", record_id,
             "--interactive",
@@ -372,9 +426,16 @@ def cmd_score(args):
     if not ensure_schema_ready("score"):
         return 1
 
+    rec = find_candidate(name=args.name, record_id=args.record_id)
+    if rec is None:
+        print(f"❌ 未找到候选人：{args.name or args.record_id}")
+        return 1
+    if not ensure_resume_parsed(rec):
+        return 1
+
     extra = []
-    if args.record_id:
-        extra += ["--record-id", args.record_id]
+    if rec.get("record_id"):
+        extra += ["--record-id", rec["record_id"]]
     elif args.name:
         extra += ["--name", args.name]
     extra.append("--interactive")

@@ -381,6 +381,7 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
     返回: (var_map, missing_list)
     """
     vm_overrides = vm_overrides or {}
+    contract_defaults = _CFG.get("contract_defaults", {}) or {}
 
     # 获取账户类型，决定银行字段路由
     acct_type_raw = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
@@ -421,6 +422,12 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
         # 2. 自动计算
         if var in auto_vals:
             var_map[key] = auto_vals[var]
+            filled.append(var)
+            continue
+
+        # 2.5 本机固定合同变量
+        if var in contract_defaults:
+            var_map[key] = str(contract_defaults[var])
             filled.append(var)
             continue
 
@@ -591,6 +598,8 @@ def send_email(to_email: str, name: str, contract_path: Path, lang: str = "zh", 
 
     smtp = get_smtp(_CFG)
     actual_to = TEST_EMAIL if TEST_MODE else to_email
+    if not draft and not TEST_MODE:
+        raise RuntimeError("生产环境禁止直接发送合同邮件；请使用 --draft 生成草稿，由 VM 人工检查后发送。")
 
     if lang == "zh":
         subject = f"【Localization Team】翻译委托框架协议 - {name}"
@@ -839,7 +848,18 @@ def main():
             cwd=str(template_docx.parent),
         )
         if r.returncode != 0:
-            print(f"❌ 模板下载失败：{r.stderr}"); sys.exit(1)
+            local_template = (
+                Path.home()
+                / "Downloads"
+                / "合同模板_合同模板汇总_附件"
+                / "GPT_变量标注版"
+                / att_list[0]["name"]
+            )
+            if local_template.exists():
+                template_docx.write_bytes(local_template.read_bytes())
+                print(f"⚠️  飞书模板下载失败，使用本地缓存：{local_template}")
+            else:
+                print(f"❌ 模板下载失败：{r.stderr or r.stdout}"); sys.exit(1)
         print("✅ 模板下载完成")
 
         # ── 填充变量 ──

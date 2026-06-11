@@ -43,8 +43,10 @@ def main():
     parser.add_argument("--record-id", dest="record_id", help="按 record_id 精确查找")
     parser.add_argument("--list",      action="store_true", help="列出所有记录")
     parser.add_argument("--dry-run",   action="store_true", help="只打印变量，不生成文件")
-    parser.add_argument("--send",      action="store_true", help="生成后发送邮件")
-    parser.add_argument("--draft",     action="store_true", help="生成后保存草稿")
+    parser.add_argument("--send",      action="store_true", help="为已确认合同生成签约邮件草稿；必须配合 --contract-file")
+    parser.add_argument("--contract-file", type=Path, help="已人工检查确认的合同 docx 路径，发送/草稿阶段必须显式指定")
+    parser.add_argument("--draft",     action="store_true", help="保存草稿")
+    parser.add_argument("--send-direct", action="store_true", help="仅 TEST_MODE 下允许直发；生产环境禁止 direct-send")
     parser.add_argument("--yes",       action="store_true", help="跳过所有交互确认")
     parser.add_argument("--no-lark-log", action="store_true", help="不写飞书流程日志")
     args = parser.parse_args()
@@ -93,6 +95,13 @@ def main():
     )
     wf.run_id = f"contract-{target['record_id'][:8]}-{int(time.time())}"
 
+    if args.send and not args.contract_file:
+        print("❌ --send 不再重新生成合同。请先生成并检查合同，再提供 --contract-file <已确认docx路径>。")
+        sys.exit(1)
+    if args.send_direct and not TEST_MODE:
+        print("❌ 生产环境禁止直接发送合同邮件。请生成草稿，由 VM 在邮箱客户端人工发送。")
+        sys.exit(1)
+
     # ── Step 1: 读取合同信息 ──────────────────────────────────────────────────
     with wf.step("读取合同信息", input_summary=f"record: {target['record_id']}") as s:
         id_scans = extract_attachments(fields.get(FLD_ID_SCAN, []))
@@ -103,6 +112,38 @@ def main():
                 f"证件扫描件: {len(id_scans)} 张"
             )
         )
+
+    if args.send:
+        checked_contract = args.contract_file.expanduser().resolve()
+        if not checked_contract.exists():
+            print(f"❌ 已确认合同文件不存在：{checked_contract}")
+            sys.exit(1)
+        if checked_contract.suffix.lower() != ".docx":
+            print(f"❌ 合同附件必须是 .docx：{checked_contract}")
+            sys.exit(1)
+        args.draft = True if not args.send_direct else args.draft
+        lang = "zh" if re.search(r'[\u4e00-\u9fff]', name) else "en"
+        with wf.step("生成签约邮件草稿", input_summary=f"已确认合同: {checked_contract.name}") as s:
+            send_email(email_addr, name, checked_contract, lang=lang, draft=not args.send_direct or args.draft)
+            s.finish(
+                output=(
+                    "草稿已保存，等待 VM 人工发送"
+                    if (not args.send_direct or args.draft) else
+                    "✅ TEST_MODE 直发完成"
+                )
+            )
+        wf.trace(
+            "合同邮件状态",
+            input_summary=f"record: {target['record_id']}",
+            output_summary=(
+                "已为人工确认过的合同文件生成草稿；未更新「合同已发送」状态。"
+                if (not args.send_direct or args.draft) else
+                "TEST_MODE 直发完成；生产环境仍需人工发送。"
+            ),
+            status=StepStatus.SKIPPED if (not args.send_direct or args.draft) else StepStatus.DONE,
+        )
+        wf.summary()
+        return
 
     # ── Step 2: 银行账户名校验 ────────────────────────────────────────────────
     with wf.step("银行账户名校验", input_summary=f"姓名: {name}  账户名: {acct_name}") as s:
@@ -241,46 +282,8 @@ def main():
 
         open_docx(output_path)
 
-        # ── Step 10: 发送邮件（可选）─────────────────────────────────────────
-        if args.send or (not args.yes and not args.dry_run):
-            if not args.send:
-                decision = wf.checkpoint(
-                    node="确认发送合同邮件",
-                    context={
-                        "候选人": name,
-                        "合同文件": output_path.name,
-                        "收件人": TEST_EMAIL if TEST_MODE else email_addr,
-                        "测试模式": "是" if TEST_MODE else "否",
-                    },
-                    prompt="是否发送合同邮件给候选人？",
-                    options=["发送", "保存草稿", "跳过"],
-                )
-                if decision == "跳过":
-                    print(f"\n合同已生成：{output_path}")
-                    print(f"如需发送，运行：python3 scripts/generate_contract_v2.py --name '{name}' --send")
-                    wf.summary()
-                    return
-                if decision == "保存草稿":
-                    args.draft = True
-
-            lang = "zh" if re.search(r'[\u4e00-\u9fff]', name) else "en"
-            with wf.step("发送合同邮件", input_summary=f"→ {TEST_EMAIL if TEST_MODE else email_addr}") as s:
-                send_email(email_addr, name, output_path, lang=lang, draft=args.draft)
-                s.finish(output="草稿已保存" if args.draft else f"✅ 发送成功")
-
-            wf.trace(
-                "合同邮件状态",
-                input_summary=f"record: {target['record_id']}",
-                output_summary=(
-                    "本地草稿已保存；未更新「合同签署」字段"
-                    if args.draft else
-                    "合同邮件已发送；「合同签署」字段等待签回核查节点更新"
-                ),
-                status=StepStatus.SKIPPED if args.draft else StepStatus.DONE,
-            )
-        else:
-            print(f"\n合同已打开预览，确认无误后运行：")
-            print(f"  python3 scripts/generate_contract_v2.py --name '{name}' --send")
+        print(f"\n合同已打开预览，确认无误后生成签约邮件草稿：")
+        print(f"  python3 scripts/generate_contract_v2.py --record-id {target['record_id']} --send --contract-file '{output_path}'")
 
     wf.summary()
 

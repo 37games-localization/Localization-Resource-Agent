@@ -598,8 +598,8 @@ class WorkflowEngine:
                     continue
                 return raw
             except (EOFError, KeyboardInterrupt):
-                print("\n  ⚠️  输入中断，记录为「跳过」")
-                return "跳过"
+                print("\n  ⚠️  输入中断，未记录为业务决策。请改用 dialog checkpoint 或显式输入决策。")
+                raise RuntimeError("Human Decision 输入中断：未收到明确人工决策")
 
     def error(self, step_name: str, error_msg: str, input_summary: str = ""):
         """记录一个错误节点，并检查熔断条件（连续失败超过 max_failures 则强制退出）"""

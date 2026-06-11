@@ -168,6 +168,23 @@ def cmd_score(args):
             return
         candidate = display
 
+    parse_script = SCRIPTS_DIR / "parse_resumes.py"
+    parse_result = subprocess.run(
+        [sys.executable, str(parse_script), "--record-id", record_id],
+        cwd=str(SKILL_DIR),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=180,
+    )
+    parse_output = (parse_result.stdout + parse_result.stderr).strip()
+    if parse_result.returncode != 0 or "失败 1" in parse_output or "LLM 解析失败" in parse_output:
+        emit_error(
+            "评分前置简历解析未完成，已停止评分。请先修复 LLM/API/附件后重试。",
+            parse_output,
+        )
+        return
+
     # 构建子命令参数
     script = SCRIPTS_DIR / "rescore_and_write_v2.py"
     cmd = [sys.executable, "-u", str(script), "--interactive", "--dialog",
@@ -492,9 +509,14 @@ def _run_simple(cmd: list, candidate: str):
 
     # 生成成功消息
     if "test" in str(cmd) or "email" in str(cmd).lower():
-        msg = f"测试题邮件已发送给 {candidate_display}"
-        if "TEST_MODE" in raw or "测试邮箱" in raw:
-            msg += "（TEST_MODE：已发到测试邮箱）"
+        if "草稿已保存" in raw:
+            msg = f"{candidate_display} 的测试题邮件草稿已生成，等待 VM 人工检查并发送"
+        elif "📤 测试中" in raw and "人工发送" in raw:
+            msg = f"{candidate_display} 已确认人工发送测试题，状态已更新为测试中"
+        else:
+            msg = f"测试题邮件已处理：{candidate_display}"
+            if "TEST_MODE" in raw or "测试邮箱" in raw:
+                msg += "（TEST_MODE：已发到测试邮箱）"
     elif "contract" in str(cmd):
         msg = f"{candidate_display} 的合同已生成"
     else:

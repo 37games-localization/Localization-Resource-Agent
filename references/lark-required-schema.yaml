@@ -183,6 +183,18 @@ tables:
         type: datetime
         required: false
         create_if_missing: true
+      - key: candidate.contract_id
+        name: "合同编号"
+        aliases: ["甲方合同编号", "合同ID", "Contract ID"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: candidate.supplier_id
+        name: "供应商编号"
+        aliases: ["供应商ID", "Vendor ID", "Supplier ID"]
+        type: text
+        required: false
+        create_if_missing: true
       - key: candidate.badcase_flag
         name: "是否Badcase"
         aliases: ["Badcase", "是否 Badcase"]

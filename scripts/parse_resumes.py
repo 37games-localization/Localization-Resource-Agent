@@ -61,14 +61,14 @@ LLM_PROMPT = """你是一个专业的游戏本地化简历解析助手。
 请从以下简历文本中提取信息，只输出 JSON，不要有任何其他文字：
 
 {
-  "word_count": <游戏翻译实际字数（整数），把简历中所有明确写出字数的游戏翻译项目字数全部加总，如无则为 0>,
+  "word_count": <游戏翻译实际字数（整数），优先读取简历中明确写出的累计/总计游戏本地化字数；如果只有分项目字数，则加总所有明确项目字数；如无则为 0>,
   "years": <游戏翻译从业年限（浮点数，保留1位小数），如无法判断则为 0>,
   "project_count": <游戏项目数量（整数），有名字的游戏项目才算，同一游戏不重复，如无则为 0>,
   "notable_entities": "<知名游戏/厂商/LSP名称，逗号分隔，如 World of Warcraft,Ubisoft,TransPerfect；如无则为空字符串>"
 }
 
 提取规则：
-1. word_count：只统计明确写了字数的游戏翻译项目，把所有条目字数加总（如 WoW 500,000 + Mass Effect 400,000 = 900,000），不要估算，不要猜测
+1. word_count：只使用明确写出的字数证据，不要估算，不要猜测；如果简历写了「累计 500 万字以上」「5,000,000+ words」「over 5 million words」这类总量，视为有效字数；如果没有总量但有分项目字数，把所有条目加总（如 WoW 500,000 + Mass Effect 400,000 = 900,000）
 2. years：从「Full-time experience: N years」「从业N年」「XXXX-至今」等描述中提取，只算游戏相关经验
 3. project_count：列出的有名字的游戏项目数量，计数单独的游戏作品
 4. notable_entities：知名游戏（AAA/知名IP）、知名厂商（Ubisoft/Capcom/Blizzard等）、知名LSP（TransPerfect/RWS/Lionbridge/SIDE等）
@@ -141,19 +141,41 @@ def extract_text(val) -> str:
     return re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
 
 
-def download_pdf(file_token: str) -> str:
+def download_pdf(file_token: str, record_id: str = "") -> str:
     """下载简历 PDF，返回本地路径，失败返回空字符串"""
     cache_path = PDF_CACHE / f"{file_token}.pdf"
     if cache_path.exists():
         return str(cache_path)
 
-    r = subprocess.run(
-        ["lark-cli", "docs", "+media-download",
-         "--token", file_token,
-         "--output", str(cache_path),
-         "--as", "bot"],
-        capture_output=True, text=True
-    )
+    if record_id:
+        cmd = [
+            "lark-cli", "base", "+record-download-attachment",
+            "--base-token", BASE_TOKEN,
+            "--table-id", TABLE_ID,
+            "--record-id", record_id,
+            "--file-token", file_token,
+            "--output", cache_path.name,
+            "--overwrite",
+            "--format", "json",
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(PDF_CACHE))
+    else:
+        r = subprocess.run(
+            ["lark-cli", "docs", "+media-download",
+             "--token", file_token,
+             "--output", str(cache_path),
+             "--as", "bot"],
+            capture_output=True, text=True
+        )
+    if r.returncode == 0 and not cache_path.exists():
+        try:
+            payload = json.loads(r.stdout or "{}")
+            downloaded = (((payload.get("data") or {}).get("downloaded")) or [])
+            saved = downloaded[0].get("saved_path", "") if downloaded else payload.get("saved_path", "")
+            if saved and Path(saved).exists():
+                Path(saved).replace(cache_path)
+        except Exception:
+            pass
     if cache_path.exists() and cache_path.stat().st_size > 0:
         return str(cache_path)
     return ""
@@ -338,7 +360,7 @@ def main():
             continue
 
         # 下载 PDF
-        pdf_path = download_pdf(file_token)
+        pdf_path = download_pdf(file_token, rid)
         if not pdf_path:
             print(f"  ❌  PDF 下载失败\n")
             err_count += 1

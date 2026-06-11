@@ -4,6 +4,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -17,8 +18,10 @@ from generate_contract import (
     FLD_CURRENCY,
     FLD_ID_NO,
     is_domestic_personal_account,
+    send_email,
     score_contract_template,
 )
+from workflow_engine import WorkflowEngine
 
 
 class LarkRecordNormalizeTest(unittest.TestCase):
@@ -149,6 +152,36 @@ class ContractTemplateRoutingTest(unittest.TestCase):
             self.recommend(fields),
             "（境外公司）Services Agreement_LOC Demo.docx",
         )
+
+
+class ProductionGuardrailTest(unittest.TestCase):
+    def test_contract_direct_send_is_blocked_outside_test_mode(self):
+        with patch("generate_contract.TEST_MODE", False):
+            with patch("generate_contract.get_smtp", return_value={"user": "sender@example.com"}):
+                with self.assertRaisesRegex(RuntimeError, "生产环境禁止直接发送合同邮件"):
+                    send_email(
+                        "candidate@example.com",
+                        "候选人",
+                        Path("/tmp/checked_contract.docx"),
+                        draft=False,
+                    )
+
+    def test_cli_checkpoint_eof_is_not_treated_as_skip(self):
+        engine = WorkflowEngine(candidate_name="测试候选人", silent=True, write_lark=False)
+        with patch("builtins.input", side_effect=EOFError):
+            with self.assertRaisesRegex(RuntimeError, "未收到明确人工决策"):
+                engine.checkpoint(
+                    node="确认写入飞书",
+                    context={"总分": "92/100"},
+                    prompt="是否写入？",
+                    options=["写入", "跳过"],
+                )
+
+    def test_required_schema_contains_contract_and_supplier_ids(self):
+        schema_text = (ROOT / "references" / "lark-required-schema.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("candidate.contract_id", schema_text)
+        self.assertIn("candidate.supplier_id", schema_text)
 
 
 if __name__ == "__main__":

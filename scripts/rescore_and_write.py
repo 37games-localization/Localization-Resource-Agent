@@ -31,6 +31,7 @@ from resume_screening_engine_v2 import ResumeScreeningEngineV2
 
 # ── 从 config.yaml 读取配置 ───────────────────────────────────────────────────
 from config_loader import load_config, get_lark
+from field_resolver import field_id_or
 from lark_cli_utils import normalize_record_list_data, run_lark_cli_json
 from manual_trace import log_manual_step
 
@@ -39,12 +40,12 @@ _LARK      = get_lark(_CFG)
 BASE_TOKEN = _LARK.get("base_token", "")
 TABLE_ID   = _LARK.get("resume_table_id", "")
 
-# 写回的字段名（必须和飞书表字段完全一致）
-FIELD_SCORE         = "总分"
-FIELD_TIER          = "初始评级"
-FIELD_SCORE_BASIS   = "评分依据"
-FIELD_AI_SUGGEST    = "AI建议"
-FIELD_VALID         = "有效简历"
+# 写回字段优先使用字段映射，避免迁移表中同名公式字段不可写。
+FIELD_SCORE         = field_id_or("candidate", "candidate.score", "总分")
+FIELD_TIER          = field_id_or("candidate", "candidate.tier", "初始评级")
+FIELD_SCORE_BASIS   = field_id_or("candidate", "candidate.score_basis", "评分依据")
+FIELD_AI_SUGGEST    = field_id_or("candidate", "candidate.ai_suggestion", "AI建议")
+FIELD_VALID         = field_id_or("candidate", "candidate.valid_resume", "有效简历")
 
 # 「有效简历」判定关键词
 GAME_KEYWORDS = [
@@ -169,7 +170,7 @@ def write_record(record_id: str, fields: dict, dry_run: bool):
 
 PDF_CACHE_DIR = Path.home() / ".loc-resume-cache"
 
-def extract_pdf_text(file_token: str, candidate_name: str) -> str:
+def extract_pdf_text(file_token: str, candidate_name: str, record_id: str = "") -> str:
     """
     下载飞书附件简历 PDF 并提取全文。
     使用本地缓存，同一 file_token 不重复下载。
@@ -180,19 +181,35 @@ def extract_pdf_text(file_token: str, candidate_name: str) -> str:
     # 优先用缓存
     if not cache_path.exists():
         try:
-            r = subprocess.run(
-                ["lark-cli", "api", "GET",
-                 f"/drive/v1/medias/{file_token}/download",
-                 "--format", "json"],
-                capture_output=True, text=True,
-                cwd=str(PDF_CACHE_DIR)
-            )
-            # lark-cli 会自动保存到 cwd，找到下载的文件
+            if record_id:
+                cmd = [
+                    "lark-cli", "base", "+record-download-attachment",
+                    "--base-token", BASE_TOKEN,
+                    "--table-id", TABLE_ID,
+                    "--record-id", record_id,
+                    "--file-token", file_token,
+                    "--output", cache_path.name,
+                    "--overwrite",
+                    "--format", "json",
+                ]
+            else:
+                cmd = [
+                    "lark-cli", "api", "GET",
+                    f"/drive/v1/medias/{file_token}/download",
+                    "--format", "json",
+                ]
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(PDF_CACHE_DIR))
             import json as _json
             meta = _json.loads(r.stdout) if r.returncode == 0 else {}
-            saved = meta.get("saved_path", "")
+            downloaded = (((meta.get("data") or {}).get("downloaded")) or [])
+            saved = ""
+            if downloaded:
+                saved = downloaded[0].get("saved_path", "")
+            if not saved:
+                saved = meta.get("saved_path", "")
             if saved and Path(saved).exists():
-                Path(saved).rename(cache_path)
+                if Path(saved) != cache_path:
+                    Path(saved).rename(cache_path)
             else:
                 return ""  # 下载失败
         except Exception as e:
@@ -453,7 +470,7 @@ def main():
         if resume_field and isinstance(resume_field, list) and resume_field[0]:
             file_token = resume_field[0].get("file_token", "") if isinstance(resume_field[0], dict) else ""
             if file_token:
-                pdf_text = extract_pdf_text(file_token, name)
+                pdf_text = extract_pdf_text(file_token, name, rid)
                 if pdf_text:
                     print(f"  📄 PDF 解析成功（{len(pdf_text)}字符）")
                 else:

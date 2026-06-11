@@ -99,7 +99,7 @@ def process_one(
         file_token = resume_field[0].get("file_token", "") if isinstance(resume_field[0], dict) else ""
         if file_token:
             with wf.step("解析简历 PDF", input_summary=f"file_token: {file_token[:12]}…") as s:
-                pdf_text = extract_pdf_text(file_token, name)
+                pdf_text = extract_pdf_text(file_token, name, rid)
                 if pdf_text:
                     s.finish(output=f"提取成功，{len(pdf_text)} 字符")
                 else:

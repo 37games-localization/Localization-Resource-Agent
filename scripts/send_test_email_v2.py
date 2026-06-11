@@ -122,8 +122,10 @@ def main():
     parser.add_argument("--list",      action="store_true")
     parser.add_argument("--dry-run",   action="store_true", help="预览但不发送")
     parser.add_argument("--prepare",   action="store_true", help="仅输出可复制邮件包，不发送、不写状态")
-    parser.add_argument("--yes",       action="store_true", help="跳过确认直接发送")
+    parser.add_argument("--yes",       action="store_true", help="跳过确认（仅用于草稿/显式 direct-send）")
     parser.add_argument("--draft",     action="store_true", help="保存草稿而非直接发送")
+    parser.add_argument("--send-direct", action="store_true", help="显式允许 SMTP 直发；生产默认禁用直发")
+    parser.add_argument("--mark-sent", action="store_true", help="VM 已人工发送测试题后，仅写回 📤 测试中 和发送时间")
     parser.add_argument("--no-lark-log", action="store_true", help="不写飞书流程日志")
     args = parser.parse_args()
 
@@ -136,14 +138,16 @@ def main():
     if not args.name and not args.record_id:
         parser.print_help(); sys.exit(0)
 
-    if not args.file:
+    if not args.file and not args.mark_sent:
         print("❌ 请用 --file 指定测试题附件路径"); sys.exit(1)
 
-    file_path = Path(args.file).expanduser().resolve()
-    if not file_path.exists():
-        print(f"❌ 文件不存在：{file_path}"); sys.exit(1)
-    if file_path.suffix.lower() not in VALID_EXTS:
-        print(f"❌ 不支持的格式：{file_path.suffix}（支持：{' / '.join(VALID_EXTS)}）"); sys.exit(1)
+    file_path = None
+    if args.file:
+        file_path = Path(args.file).expanduser().resolve()
+        if not file_path.exists():
+            print(f"❌ 文件不存在：{file_path}"); sys.exit(1)
+        if file_path.suffix.lower() not in VALID_EXTS:
+            print(f"❌ 不支持的格式：{file_path.suffix}（支持：{' / '.join(VALID_EXTS)}）"); sys.exit(1)
 
     # ── 拉取飞书记录 ──────────────────────────────────────────────────────────
     records = fetch_records()
@@ -186,6 +190,19 @@ def main():
         input_summary=f"record: {target['record_id']}",
         output_summary=f"姓名: {name}  邮箱: {email}  语言对: {lang_pair}",
     )
+
+    if args.mark_sent:
+        with wf.step("确认人工发送并写回状态", input_summary=f"record: {target['record_id']}") as s:
+            update_record(target["record_id"], {
+                FLD_STATUS:       "📤 测试中",
+                FLD_TEST_SENT_AT: int(time.time() * 1000),
+            })
+            s.finish(output="VM 已确认测试题人工发送；招募状态 → 📤 测试中，测试发送时间已记录")
+        wf.summary()
+        return
+
+    if not args.send_direct:
+        args.draft = True
 
     # ── Step 2: 校验附件 ──────────────────────────────────────────────────────
     with wf.step("校验测试题附件", input_summary=str(file_path)) as s:
@@ -247,8 +264,12 @@ def main():
                 "主题":     subject,
                 "测试模式": "是" if TEST_MODE else "否",
             },
-            prompt="确认发送以上邮件（含附件）？",
-            options=["发送", "保存草稿", "取消"],
+            prompt=(
+                "生产默认生成草稿，不直接发送。确认生成草稿，或显式选择 direct-send。"
+                if not args.send_direct else
+                "确认直接发送以上邮件（含附件）？"
+            ),
+            options=["保存草稿", "取消"] if not args.send_direct else ["发送", "保存草稿", "取消"],
         )
 
         if decision == "取消":
@@ -266,16 +287,21 @@ def main():
             return
 
     # ── Step 6: 发送邮件 ──────────────────────────────────────────────────────
-    with wf.step("发送邮件", input_summary=f"→ {actual_to}  附件: {file_path.name}") as s:
+    with wf.step("生成测试邀约邮件", input_summary=f"→ {actual_to}  附件: {file_path.name}") as s:
         _send_email(email, subject, body, file_path, draft=args.draft)
         s.finish(output="草稿已保存" if args.draft else f"✅ 发送成功 → {actual_to}")
 
     if args.draft:
         wf.trace(
             "跳过状态写回",
-            output_summary="本地草稿已保存；未发送，未写招募状态",
+            output_summary=(
+                "本地草稿已保存；未发送，未写招募状态。"
+                f"VM 人工发送后运行：python3 scripts/send_test_email_v2.py --record-id {target['record_id']} --mark-sent"
+            ),
             status=StepStatus.SKIPPED,
         )
+        print(f"\n草稿已生成。VM 人工检查并发送后，再运行：")
+        print(f"  python3 scripts/send_test_email_v2.py --record-id {target['record_id']} --mark-sent")
         wf.summary()
         return
 

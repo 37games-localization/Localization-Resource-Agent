@@ -37,6 +37,8 @@
 | `candidate.score_basis` | 评分依据 | 评分计算过程和关键依据，供 VM 快速复核。 | 写/读 | 是 | 评分、看板 |
 | `candidate.ai_suggestion` | AI建议 | 下一步建议，如优先录用、人工复核、不建议录用。 | 写/读 | 是 | 评分、VM 决策 |
 | `candidate.test_sent_at` | 测试发送时间 | 测试题邮件发送后记录时间。 | 写/读 | 否 | 测试题邮件、看板 |
+| `candidate.contract_id` | 合同编号 | 甲方内部合同审批编号；乙方签回后由 VM/审批流程补充，供后续追踪和归档。 | 写/读 | 否 | 合同审批、财务登记、归档 |
+| `candidate.supplier_id` | 供应商编号 | 财务/供应商系统登记后的供应商编号，供资源入库和后续结算追踪。 | 写/读 | 否 | 供应商登记、财务审批、入库 |
 | `candidate.badcase_flag` | 是否Badcase | VM 标记运行结果不符合预期。 | 读/写 | 否 | Badcase 回流 |
 | `candidate.expected_result` | 期望结果 | VM 对 badcase 的一句话期望结果。 | 读/写 | 否 | Badcase 回流 |
 | `candidate.badcase_snapshot` | Badcase快照 | 自动生成的脱敏 snapshot JSON 附件。 | 写/读 | 否 | Badcase 回流 |
@@ -85,8 +87,9 @@
 1. 主表至少保留：姓名、邮箱、语言对、招募状态、总分、初始评级、有效简历、评分依据、AI建议。
 2. 若要跑测试题邮件，必须保留：邮箱、语言对、招募状态、测试发送时间。
 3. 若要跑合同，必须配置合同信息表，并保留合同信息表中的必需字段。
-4. 若要看板/待决策恢复，必须保留或创建 `Agent流程日志` 表。
-5. 若要 badcase 回流，必须保留：是否Badcase、期望结果、Badcase快照。
+4. 若要覆盖合同审批/供应商入库，主表需要保留或新增：合同编号、供应商编号。
+5. 若要看板/待决策恢复，必须保留或创建 `Agent流程日志` 表。
+6. 若要 badcase 回流，必须保留：是否Badcase、期望结果、Badcase快照。
 
 ## 当前 Badcase 字段映射
 
