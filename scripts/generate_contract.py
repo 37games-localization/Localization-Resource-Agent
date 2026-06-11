@@ -185,7 +185,7 @@ def is_china_id_number(text: str) -> bool:
 def has_domestic_bank_signal(text: str) -> bool:
     value = extract_text(text).lower()
     markers = [
-        "中国", "china", "cn", "beijing", "shanghai", "guangzhou", "shenzhen",
+        "中国", "china", "beijing", "shanghai", "guangzhou", "shenzhen",
         "hangzhou", "nanjing", "chengdu", "wuhan", "xiamen", "anhui", "hefei",
         "工商银行", "农业银行", "中国银行", "建设银行", "招商银行", "交通银行",
         "邮储", "中信", "光大", "浦发", "兴业", "民生", "广发", "平安银行",
@@ -197,16 +197,93 @@ def is_domestic_personal_account(fields: dict) -> bool:
     acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
     if not ("个人" in acct_type or "personal" in acct_type.lower()):
         return False
-    currency = extract_text(fields.get(FLD_CURRENCY, ""))
     id_no = extract_text(fields.get(FLD_ID_NO, ""))
     bank_name = extract_text(fields.get(FLD_BANK_NAME, ""))
     bank_addr = extract_text(fields.get(FLD_BANK_ADDR, ""))
     return (
-        "人民币" in currency or "cny" in currency.lower() or
         is_china_id_number(id_no) or
         has_domestic_bank_signal(bank_name) or
         has_domestic_bank_signal(bank_addr)
     )
+
+
+def is_personal_account(fields: dict) -> bool:
+    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
+    return "个人" in acct_type or "personal" in acct_type.lower()
+
+
+def is_company_account(fields: dict) -> bool:
+    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
+    return "公司" in acct_type or "business" in acct_type.lower()
+
+
+def is_cny_currency(fields: dict) -> bool:
+    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
+    return "人民币" in currency or "cny" in currency or "rmb" in currency
+
+
+def is_foreign_currency(fields: dict) -> bool:
+    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
+    if not currency:
+        return False
+    foreign_markers = [
+        "外币", "usd", "美元", "eur", "欧元", "jpy", "日元", "krw", "韩元",
+        "hkd", "港币", "gbp", "英镑", "sgd", "新币", "aud", "cad",
+    ]
+    return any(marker in currency for marker in foreign_markers) and not is_cny_currency(fields)
+
+
+def score_contract_template(name: str, fields: dict) -> int:
+    """Score how well a template name matches account type, region, and currency.
+
+    Region and currency are intentionally separate. A domestic account can receive
+    foreign currency, and an overseas account can receive CNY.
+    """
+    lowered = name.lower()
+    is_company_acct = is_company_account(fields)
+    is_personal_acct = is_personal_account(fields)
+    is_domestic_personal = is_domestic_personal_account(fields)
+    wants_cny = is_cny_currency(fields)
+    wants_foreign = is_foreign_currency(fields)
+
+    score = 0
+
+    if is_company_acct:
+        if "公司" in name or "business" in lowered or "company" in lowered:
+            score += 40
+        if "个人" in name or "personal" in lowered:
+            score -= 20
+        return score
+
+    if is_personal_acct:
+        if "个人" in name or "personal" in lowered:
+            score += 20
+        if "公司" in name or "business" in lowered or "company" in lowered:
+            score -= 30
+
+    if is_domestic_personal:
+        if "境内个人" in name:
+            score += 30
+        if "境外" in name or "foreign" in lowered:
+            score -= 20
+    else:
+        if "境外" in name or "foreign" in lowered:
+            score += 20
+        if "境内个人" in name:
+            score -= 15
+
+    if wants_cny:
+        if "人民币" in name or "cny" in lowered or "rmb" in lowered:
+            score += 30
+        if "外币" in name or "foreign currency" in lowered:
+            score -= 25
+    elif wants_foreign:
+        if "外币" in name or "foreign currency" in lowered:
+            score += 30
+        if "人民币" in name or "cny" in lowered or "rmb" in lowered:
+            score -= 25
+
+    return score
 
 
 def extract_attachments(val) -> list:
@@ -260,10 +337,6 @@ def pick_template_for_candidate(template_records: list, fields: dict, auto_confi
     """
     根据候选人账户类型自动推荐合同模板，VM 可直接回车确认或手动选择。
     """
-    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
-    is_company_acct = "公司" in acct_type or "Business" in acct_type
-    is_domestic_personal = is_domestic_personal_account(fields)
-
     available = []
     for rec in template_records:
         name = extract_text(rec.get("fields", {}).get(TEMPLATE_NAME_FLD, ""))
@@ -277,22 +350,7 @@ def pick_template_for_candidate(template_records: list, fields: dict, auto_confi
         print("❌ 合同模板表中无可用模板")
         return None, ""
 
-    # 按账户类型打分排序（最匹配的排最前）
-    def score(name):
-        s = 0
-        lowered = name.lower()
-        if is_company_acct and ("公司" in name or "Business" in name or "company" in name.lower()):
-            s += 10
-        if not is_company_acct and "公司" not in name and "Business" not in name:
-            s += 5
-        if is_domestic_personal:
-            if "境内个人" in name or "人民币" in name:
-                s += 30
-            if "外币" in name or "境外" in name or "foreign" in lowered:
-                s -= 20
-        return s
-
-    available.sort(key=lambda x: score(x[1]), reverse=True)
+    available.sort(key=lambda x: score_contract_template(x[1], fields), reverse=True)
 
     print("\n可用合同模板：")
     for i, (rec, name) in enumerate(available, 1):

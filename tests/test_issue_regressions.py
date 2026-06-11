@@ -17,6 +17,7 @@ from generate_contract import (
     FLD_CURRENCY,
     FLD_ID_NO,
     is_domestic_personal_account,
+    score_contract_template,
 )
 
 
@@ -54,6 +55,33 @@ class ScoreCapTest(unittest.TestCase):
 
 
 class ContractTemplateRoutingTest(unittest.TestCase):
+    TEMPLATE_NAMES = [
+        "（境内个人-人民币）翻译委托框架协议_LOC Demo.docx",
+        "（境内个人-外币）翻译委托框架协议_LOC Demo.docx",
+        "（境外个人-人民币）翻译委托框架协议_LOC Demo.docx",
+        "（个人-外币-个人账户）翻译委托框架协议_LOC Demo.docx",
+        "（境外公司）Services Agreement_LOC Demo.docx",
+    ]
+
+    def recommend(self, fields):
+        return max(self.TEMPLATE_NAMES, key=lambda name: score_contract_template(name, fields))
+
+    def personal_fields(self, *, domestic: bool, currency: str):
+        fields = {
+            ACCOUNT_TYPE_FIELD_ID: "个人账户 Personal account",
+            FLD_CURRENCY: currency,
+            FLD_ID_NO: "P1234567",
+            FLD_BANK_NAME: "DBS Bank",
+            FLD_BANK_ADDR: "Singapore",
+        }
+        if domestic:
+            fields.update({
+                FLD_ID_NO: "110101199003071234",
+                FLD_BANK_NAME: "中国银行",
+                FLD_BANK_ADDR: "北京市朝阳区",
+            })
+        return fields
+
     def test_domestic_personal_account_detects_china_signals(self):
         fields = {
             ACCOUNT_TYPE_FIELD_ID: "个人账户 Personal account",
@@ -75,6 +103,52 @@ class ContractTemplateRoutingTest(unittest.TestCase):
         }
 
         self.assertFalse(is_domestic_personal_account(fields))
+
+    def test_domestic_personal_cny_recommends_domestic_rmb_template(self):
+        fields = self.personal_fields(domestic=True, currency="CNY 人民币")
+
+        self.assertEqual(
+            self.recommend(fields),
+            "（境内个人-人民币）翻译委托框架协议_LOC Demo.docx",
+        )
+
+    def test_domestic_personal_foreign_currency_recommends_domestic_foreign_template(self):
+        fields = self.personal_fields(domestic=True, currency="USD 美元")
+
+        self.assertEqual(
+            self.recommend(fields),
+            "（境内个人-外币）翻译委托框架协议_LOC Demo.docx",
+        )
+
+    def test_overseas_personal_cny_recommends_overseas_rmb_template(self):
+        fields = self.personal_fields(domestic=False, currency="CNY 人民币")
+
+        self.assertEqual(
+            self.recommend(fields),
+            "（境外个人-人民币）翻译委托框架协议_LOC Demo.docx",
+        )
+
+    def test_overseas_personal_foreign_currency_recommends_personal_foreign_template(self):
+        fields = self.personal_fields(domestic=False, currency="USD 美元")
+
+        self.assertEqual(
+            self.recommend(fields),
+            "（个人-外币-个人账户）翻译委托框架协议_LOC Demo.docx",
+        )
+
+    def test_company_account_recommends_company_template_even_with_cny(self):
+        fields = {
+            ACCOUNT_TYPE_FIELD_ID: "公司账户 Business account",
+            FLD_CURRENCY: "CNY 人民币",
+            FLD_ID_NO: "110101199003071234",
+            FLD_BANK_NAME: "中国银行",
+            FLD_BANK_ADDR: "北京市朝阳区",
+        }
+
+        self.assertEqual(
+            self.recommend(fields),
+            "（境外公司）Services Agreement_LOC Demo.docx",
+        )
 
 
 if __name__ == "__main__":
