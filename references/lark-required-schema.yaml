@@ -1,0 +1,411 @@
+schema_version: "1.0"
+skill: loc-resume-screening
+updated: "2026-06-10"
+description: >
+  Required Lark Base schema for the localization resource-management Agent.
+  This file defines logical fields. Runtime field IDs are discovered per table
+  and saved to config/lark-field-mapping.yaml.
+
+tables:
+  candidate:
+    desc: "资源候选人主表：候选人基础信息、招募状态、评分结果、Badcase 标记"
+    table_name: "简历收集表"
+    create_if_missing_table: false
+    config_keys:
+      base_token: "lark.base_token"
+      table_id: "lark.resume_table_id"
+    identity_fields:
+      - candidate.record_id
+      - candidate.name
+      - candidate.nickname
+      - candidate.email
+    required_fields:
+      - key: candidate.name
+        name: "姓名"
+        aliases: ["资源商姓名", "候选人姓名", "Name", "Full name", "姓名（全名）"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: candidate.nickname
+        name: "昵称"
+        aliases: ["常用名", "英文名", "别名", "Nickname", "Preferred name"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: candidate.email
+        name: "邮箱"
+        aliases: ["常用邮箱", "常用工作邮箱", "Email", "Work email", "邮箱地址"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: candidate.language_pair
+        name: "语言对"
+        aliases: ["语种", "语言方向", "Language pair"]
+        type: select
+        required: true
+        create_if_missing: true
+      - key: candidate.resume
+        name: "简历"
+        aliases: ["简历附件", "Resume", "CV"]
+        type: attachment
+        required: false
+        create_if_missing: true
+      - key: candidate.status
+        name: "招募状态"
+        aliases: ["当前状态", "状态", "流程状态", "Recruitment status"]
+        type: select
+        multiple: false
+        required: true
+        create_if_missing: true
+        options:
+          - "📋 简历待筛选"
+          - "🔍 初筛中"
+          - "✅ 初筛通过"
+          - "❌ 已拒绝"
+          - "📝 测试题待发"
+          - "📤 测试中"
+          - "✅ 测试通过"
+          - "❌ 测试未通过"
+          - "📧 合同信息收集中"
+          - "📄 合同待生成"
+          - "📮 合同已发送"
+          - "🔏 等待签署"
+          - "✅ 合同已签署"
+          - "💰 财务待登记"
+          - "🔍 财务审批中"
+          - "✅ 已入库"
+      - key: candidate.manual_translation_price
+        name: "人工翻译单价"
+        aliases: ["翻译单价", "人工单价", "Translation rate"]
+        type: number
+        required: false
+        create_if_missing: true
+      - key: candidate.aipe_price
+        name: "AIPE单价"
+        aliases: ["AIPE 单价", "AIPE rate"]
+        type: number
+        required: false
+        create_if_missing: true
+      - key: candidate.price_flexibility
+        name: "报价商议空间"
+        aliases: ["价格商议空间", "报价是否可议", "Price flexibility"]
+        type: select
+        multiple: false
+        required: false
+        create_if_missing: true
+        options: ["固定", "有一些商议空间", "有较大商议空间", "可商议", "未知"]
+      - key: candidate.services
+        name: "提供的服务"
+        aliases: ["服务类型", "Service", "Services"]
+        type: select
+        multiple: true
+        required: false
+        create_if_missing: true
+      - key: candidate.project_experience
+        name: "项目经历"
+        aliases: ["项目经验", "游戏项目经历", "Project experience"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: candidate.other_experience
+        name: "其他相关经验"
+        aliases: ["其他相关经历", "Other experience"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: candidate.parsed_word_count
+        name: "解析字数"
+        aliases: ["简历解析字数", "游戏翻译字数"]
+        type: number
+        required: false
+        create_if_missing: true
+      - key: candidate.parsed_years
+        name: "解析年限"
+        aliases: ["简历解析年限", "游戏翻译年限"]
+        type: number
+        required: false
+        create_if_missing: true
+      - key: candidate.parsed_project_count
+        name: "解析项目数"
+        aliases: ["简历解析项目数"]
+        type: number
+        required: false
+        create_if_missing: true
+      - key: candidate.parsed_entities
+        name: "解析知名实体"
+        aliases: ["知名游戏/厂商", "解析实体"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: candidate.resume_parsed_at
+        name: "简历解析时间"
+        aliases: ["解析时间", "最后解析时间"]
+        type: datetime
+        required: false
+        create_if_missing: true
+      - key: candidate.score
+        name: "总分"
+        aliases: ["AI评分", "评分", "Score"]
+        type: number
+        required: true
+        create_if_missing: true
+      - key: candidate.tier
+        name: "初始评级"
+        aliases: ["评分等级", "评级", "Grade", "Tier"]
+        type: select
+        multiple: false
+        required: true
+        create_if_missing: true
+        options: ["S", "A", "B", "C", "D"]
+      - key: candidate.valid_resume
+        name: "有效简历"
+        aliases: ["是否有效简历"]
+        type: select
+        multiple: false
+        required: true
+        create_if_missing: true
+        options: ["是", "否"]
+      - key: candidate.score_basis
+        name: "评分依据"
+        aliases: ["评分说明", "Score basis"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: candidate.ai_suggestion
+        name: "AI建议"
+        aliases: ["下一步建议", "Agent建议"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: candidate.test_sent_at
+        name: "测试发送时间"
+        aliases: ["测试题发送时间"]
+        type: datetime
+        required: false
+        create_if_missing: true
+      - key: candidate.badcase_flag
+        name: "是否Badcase"
+        aliases: ["Badcase", "是否 Badcase"]
+        type: select
+        multiple: false
+        required: false
+        create_if_missing: true
+        options: ["⚠️ 是", "✅ 已处理"]
+      - key: candidate.expected_result
+        name: "期望结果"
+        aliases: ["Badcase期望结果", "预期结果"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: candidate.badcase_snapshot
+        name: "Badcase快照"
+        aliases: ["Badcase Snapshot", "脱敏快照"]
+        type: attachment
+        required: false
+        create_if_missing: true
+
+  workflow_log:
+    desc: "流程日志表：每个 Agent 操作动作记一行，支撑可视化和 checkpoint 恢复"
+    table_name: "Agent流程日志"
+    create_if_missing_table: true
+    config_keys:
+      base_token: "lark.base_token"
+      table_id: "lark.log_table_id"
+    required_fields:
+      - key: workflow.run_id
+        name: "run_id"
+        aliases: ["Run ID", "流程ID"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: workflow.candidate_record_id
+        name: "candidate_record_id"
+        aliases: ["候选人record_id", "候选人记录ID"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: workflow.candidate_name
+        name: "candidate_name"
+        aliases: ["候选人", "候选人姓名"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: workflow.step_name
+        name: "step_name"
+        aliases: ["步骤名", "节点名"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: workflow.step_type
+        name: "step_type"
+        aliases: ["步骤类型"]
+        type: select
+        multiple: false
+        required: true
+        create_if_missing: true
+        options: ["action", "checkpoint", "decision", "error"]
+      - key: workflow.status
+        name: "status"
+        aliases: ["执行状态"]
+        type: select
+        multiple: false
+        required: true
+        create_if_missing: true
+        options: ["running", "done", "waiting", "decided", "skipped", "failed"]
+      - key: workflow.input_summary
+        name: "input_summary"
+        aliases: ["输入摘要"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: workflow.output_summary
+        name: "output_summary"
+        aliases: ["输出摘要"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: workflow.decision
+        name: "decision"
+        aliases: ["人工决策"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: workflow.created_at
+        name: "created_at"
+        aliases: ["创建时间"]
+        type: datetime
+        required: true
+        create_if_missing: true
+
+  contract_info:
+    desc: "合同信息表：敏感数据隔离，用于合同变量填充"
+    table_name: "合同信息收集"
+    create_if_missing_table: false
+    config_keys:
+      base_token: "lark.contract_base_token"
+      table_id: "lark.contract_table_id"
+    required_fields:
+      - key: contract.name
+        name: "姓名（全名）"
+        aliases: ["姓名", "乙方姓名", "Your full name"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: contract.email
+        name: "常用工作邮箱"
+        aliases: ["邮箱", "乙方邮箱", "Your work email address"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: contract.id_number
+        name: "身份证或护照号"
+        aliases:
+          - "证件号"
+          - "Your identification number"
+          - "身份证或护照号 | Your identification number (ID number, passport number, etc.)"
+        type: text
+        required: true
+        create_if_missing: true
+      - key: contract.address
+        name: "个人住址"
+        aliases: ["乙方地址", "地址", "Residential address"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.phone
+        name: "联系电话"
+        aliases: ["手机号", "电话", "Phone number", "Mobile phone"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.account_type
+        name: "收款账号类型"
+        aliases:
+          - "账户类型"
+          - "What type of bank account do you use?"
+          - "收款账号类型 | What type of bank account do you use to receive payments?"
+        type: select
+        multiple: false
+        required: true
+        create_if_missing: true
+        options: ["个人账户 Personal account", "公司账户 Business account"]
+      - key: contract.bank_account_name
+        name: "个人账户 - 账户名"
+        aliases: ["账户名", "Personal account - Bank account name"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: contract.bank_account_number
+        name: "个人账户 - 账号"
+        aliases:
+          - "账号"
+          - "IBAN"
+          - "Account number / IBAN"
+          - "个人账户 - 账号 | Personal account - Account number / IBAN"
+        type: text
+        required: true
+        create_if_missing: true
+      - key: contract.bank_name
+        name: "个人账户 - 银行名"
+        aliases: ["个人账户 - 银行名称", "Personal account - Bank name"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.bank_address
+        name: "个人账户 - 支行地址"
+        aliases: ["个人账户 - 银行地址", "Personal account - Bank address"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.company_bank_account_name
+        name: "公司账户 - 账户名"
+        aliases: ["Business account - Bank account name"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.company_bank_account_number
+        name: "公司账户 - 账号"
+        aliases: ["公司账户 - 账号 / IBAN", "Business account - Account number"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.company_bank_name
+        name: "公司账户 - 银行名"
+        aliases: ["公司账户 - 银行名称", "Business account - Bank name"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.company_bank_address
+        name: "公司账户 - 支行地址"
+        aliases: ["公司账户 - 银行地址", "Business account - Bank address"]
+        type: text
+        required: false
+        create_if_missing: true
+      - key: contract.swift
+        name: "SWIFT"
+        aliases: ["Swift Code"]
+        type: text
+        required: true
+        create_if_missing: true
+      - key: contract.currency
+        name: "收款货币 | What currency do you prefer to receive payments in?"
+        aliases: ["收款货币", "币种", "Currency"]
+        type: select
+        multiple: false
+        required: false
+        create_if_missing: true
+      - key: contract.id_scan
+        name: "请上传您的个人身份证正反两面或者护照电子扫描件（请上传图像文件）"
+        aliases:
+          - "证件扫描件"
+          - "身份证护照扫描件"
+          - "请上传您的个人身份证正反两面或者护照电子扫描件（请上传图像文件）| Please upload a scanned copy or photo of your ID card or passport (image files only)."
+        type: attachment
+        required: false
+        create_if_missing: true
+      - key: contract.signed_contract
+        name: "合同签署"
+        aliases: ["是否已签署", "Signed contract"]
+        type: checkbox
+        required: false
+        create_if_missing: true
