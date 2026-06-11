@@ -22,7 +22,7 @@
 | 发婉拒邮件 | 「给 XXX 发婉拒」 |
 | 状态推进 | 「XXX 财务审批通过了，更新状态」 |
 | 查看候选人列表 | 「列出所有初筛通过的候选人」 |
-| **标记 Badcase** | 「把这个标成 badcase，应该进人工复核」或直接在飞书打标 |
+| **标记 Badcase** | 「把这个标成 badcase，应该进人工复核」 |
 
 ---
 
@@ -30,15 +30,7 @@
 
 类似 macOS 崩溃上报 / Sentry 一键上报的逻辑：**VM 感知到问题，标记一下，上下文自动收集**。
 
-### VM 只需做两件事
-
-**方式一：飞书打标**
-
-在资源候选人主表找到对应候选人那一行：
-- 「**是否Badcase**」列 → 选「⚠️ 是」
-- 「**期望结果**」列 → 写一句话（可不填）
-
-**方式二：自然语言**（告诉 Agent）：
+### VM 只需要自然语言告诉 Agent
 
 ```
 把这个标成 badcase，应该进人工复核，不该直接婉拒
@@ -49,7 +41,7 @@
 ### 系统自动完成
 
 ```
-VM 打标
+VM 自然语言告诉 Agent
   ↓
 Agent 生成脱敏快照 JSON（脱敏处理：真实姓名/邮箱/电话/证件全部移除）
   ↓
@@ -59,14 +51,6 @@ Agent 生成脱敏快照 JSON（脱敏处理：真实姓名/邮箱/电话/证件
 ```
 
 VM 不需要任何 GitHub 权限，不需要写技术复盘，不需要整理截图和日志。
-
-Badcase 上报必须走统一协议：
-
-- VM 侧只上传 `snapshot_version=2.0` 的脱敏 snapshot JSON。
-- 项目侧只从 snapshot 生成 GitHub issue，不允许不同 Agent 自由拼 issue 格式。
-- issue 标题、正文、label 统一由 `scripts/badcase_protocol.py` 和 `scripts/push_badcase_issues.py` 生成。
-- snapshot 校验失败或安全扫描命中时会直接跳过。
-- 禁止包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。
 
 ---
 
@@ -131,7 +115,9 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 - ✨ 新增测试题邮件 `--prepare`：只输出可复制邮件包，不发送、不写状态。
 - 🐛 修复合同模板推荐：按账户类型、账户地区、收款币种联合打分；新增国内/海外 × 人民币/外币四象限测试集。
 - 🐛 修复合同 docx 自动打开体验：优先 WPS，失败时输出明确文件路径。
-- ✅ 验证：生产 issue / Badcase 协议回归测试 16/16，评分引擎测试 25/25，全脚本语法检查通过。
+- 🐛 修复生产评分规则来源：价格维度必须读取 Lark「评分规则配置」表；缺表、缺字段、缺语言对时阻断评分，不再静默使用包内旧规则。
+- 🛡️ 新增仓库脱敏扫描：防止 README、handover、QA 报告和 badcase 内容带入邮箱、本机路径、Lark 表/记录 ID、API key 等敏感信息。
+- ✅ 验证：生产 issue / Badcase 协议回归测试 19/19，评分引擎测试 25/25，全脚本语法检查通过。
 
 ### v2.3（2026-06-05）
 **Badcase 回流上线**
@@ -197,7 +183,7 @@ loc-resume-screening/
 ├── config.example.yaml         # 配置模板
 ├── config.local.yaml           # ← VM 本机唯一需要编辑的文件（不提交）
 ├── config/
-│   └── resume_screening_rules_v2.json   # 评分规则（价格/年限/字数）
+│   └── resume_screening_rules_v2.json   # 包内测试规则；生产价格规则以 Lark 表为准
 ├── scripts/
 │   ├── generate_contract.py    # 合同生成 + 发送
 │   ├── send_test_email.py      # 测试题邮件
@@ -206,6 +192,7 @@ loc-resume-screening/
 │   ├── parse_resumes.py        # 简历解析（LLM）
 │   ├── evaluate_resumes.py     # LLM 一次性解析+评分（可选路径）
 │   ├── rescore_and_write.py    # 重算评分并写回飞书
+│   ├── pricing_rules.py        # 读取 Lark 评分规则配置表
 │   ├── workflow_runner.py      # 手动串联入口
 │   ├── workflow_engine.py      # 过程日志/人工确认基础能力
 │   ├── schema_validator.py     # 飞书表头检查与字段映射
@@ -220,25 +207,6 @@ loc-resume-screening/
     ├── config.md               # 配置字段说明
     └── demo-data.md            # 测试数据
 ```
-
----
-
-## 回滚说明
-
-合并到 `main` 后仍可回滚：
-
-```bash
-# 查看 main 最近提交
-git log --oneline --decorate -10
-
-# 推荐：撤销某次合并或提交，保留历史
-git revert <commit_sha>
-
-# 或拉回稳定 tag 做临时验证
-git checkout v0.1-single-node-qa
-```
-
-生产端如果发现阻断问题，请先让 Agent 导出脱敏 Badcase snapshot，再由项目负责人按统一模板开 GitHub issue。不要在 issue 或交接文档中暴露真实 base token、table id、邮箱、候选人姓名、本地路径等敏感信息。
 
 ---
 
