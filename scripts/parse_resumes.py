@@ -30,6 +30,7 @@ import fitz  # pymupdf
 # ── 配置（从 config.yaml 读取） ───────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_lark, get_llm_api_key, is_test_mode
+from field_resolver import field_id_or
 
 _CFG       = load_config()
 _LARK      = get_lark(_CFG)
@@ -38,15 +39,15 @@ TABLE_ID   = _LARK.get("resume_table_id", "")
 PDF_CACHE  = Path.home() / ".loc-resume-cache"
 PDF_CACHE.mkdir(exist_ok=True)
 
-# 飞书字段 ID（固定，不会变）
+# 飞书字段 ID：优先使用 schema_validator.py 生成的映射；缺映射时回退旧生产表 ID。
 FIELD_IDS = {
-    "姓名":         "fldSAfsOJf",
-    "简历":         "fld7W0W7e2",
-    "解析字数":     "flduKRhgTV",
-    "解析年限":     "flde0kTB3Z",
-    "解析项目数":   "fldfpo5X1f",
-    "解析知名实体": "fld3cWjCaA",
-    "简历解析时间": "fldh8Ebrxl",
+    "姓名":         field_id_or("candidate", "candidate.name", "fldSAfsOJf"),
+    "简历":         field_id_or("candidate", "candidate.resume", "fld7W0W7e2"),
+    "解析字数":     field_id_or("candidate", "candidate.parsed_word_count", "flduKRhgTV"),
+    "解析年限":     field_id_or("candidate", "candidate.parsed_years", "flde0kTB3Z"),
+    "解析项目数":   field_id_or("candidate", "candidate.parsed_project_count", "fldfpo5X1f"),
+    "解析知名实体": field_id_or("candidate", "candidate.parsed_entities", "fld3cWjCaA"),
+    "简历解析时间": field_id_or("candidate", "candidate.resume_parsed_at", "fldh8Ebrxl"),
 }
 
 LLM_MODEL  = _CFG.get("llm", {}).get("model", "claude-sonnet-4-5-20250929")
@@ -150,11 +151,50 @@ def extract_pdf_text(pdf_path: str) -> str:
         return ""
 
 
-# OpenClaw 代理配置
-# apiKey 优先读环境变量 LOC_LLM_API_KEY，其次从 openclaw.json 自动读取
+# LLM 代理配置：apiKey 必须在 config.yaml 或 LOC_LLM_API_KEY 显式配置。
 _PROXY_BASE_URL = _CFG.get("llm", {}).get("base_url", "https://ai-proxy.37wan.com/anthropic")
 _LLM_MODEL_ID   = LLM_MODEL
 _PROXY_API_KEY  = get_llm_api_key(_CFG)
+_LLM_PROVIDER   = _CFG.get("llm", {}).get("provider", "anthropic")
+
+
+def _call_openai_compatible(prompt: str) -> str:
+    import ssl
+    import urllib.request
+    import urllib.error
+    try:
+        import certifi
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ssl_context = ssl.create_default_context()
+
+    base_url = _PROXY_BASE_URL.rstrip("/")
+    url = f"{base_url}/chat/completions"
+    payload = json.dumps(
+        {
+            "model": _LLM_MODEL_ID,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 512,
+            "temperature": 0,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {_PROXY_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60, context=ssl_context) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")[:300]
+        raise RuntimeError(f"OpenAI-compatible LLM HTTP {e.code}: {detail}") from e
+    return body["choices"][0]["message"]["content"].strip()
 
 
 def call_llm(text: str) -> dict | None:
@@ -162,17 +202,20 @@ def call_llm(text: str) -> dict | None:
     prompt = LLM_PROMPT.replace("{text}", text[:8000])  # 截断防超长
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(
-            base_url=_PROXY_BASE_URL,
-            api_key=_PROXY_API_KEY,
-        )
-        msg = client.messages.create(
-            model=_LLM_MODEL_ID,
-            max_tokens=512,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        raw = msg.content[0].text.strip()
+        if _LLM_PROVIDER in {"deepseek", "openai_compatible"}:
+            raw = _call_openai_compatible(prompt)
+        else:
+            import anthropic
+            client = anthropic.Anthropic(
+                base_url=_PROXY_BASE_URL,
+                api_key=_PROXY_API_KEY,
+            )
+            msg = client.messages.create(
+                model=_LLM_MODEL_ID,
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw = msg.content[0].text.strip()
         # 提取 JSON
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if m:

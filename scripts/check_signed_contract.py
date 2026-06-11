@@ -33,11 +33,15 @@ import base64
 import argparse
 import subprocess
 import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
+from field_resolver import field_id_or
+from lark_cli_utils import run_lark_cli_json
+from manual_trace import log_manual_step
 
 _CFG = load_config()
 
@@ -47,16 +51,19 @@ TABLE_ID_MAIN     = get_lark(_CFG).get("resume_table_id", "")      # 简历收�
 TABLE_ID_CONTRACT = get_lark(_CFG).get("contract_table_id", "")    # 合同信息收集表
 
 # 飞书字段 ID（主表）
-FLD_NAME   = "fldSAfsOJf"
-FLD_EMAIL  = "fldWf5X8NR"
-FLD_STATUS = "fldfp6Pn7l"
+FLD_NAME   = field_id_or("candidate", "candidate.name", "fldSAfsOJf")
+FLD_EMAIL  = field_id_or("candidate", "candidate.email", "fldWf5X8NR")
+FLD_STATUS = field_id_or("candidate", "candidate.status", "fldfp6Pn7l")
 
 # 合同信息表关键字段 ID（用于一致性核查）
-FLD_C_NAME    = "fld2JEyq9H"   # 姓名（全名）
-FLD_C_EMAIL   = "fldYELKkKa"   # 邮箱
-FLD_C_ID_NO   = "fld3hdHuVd"   # 身份证/护照号
-FLD_C_BANK    = "fld7CGT1GH"   # 银行账号
-FLD_C_PROGRESS = "fldtXTkTTi"  # 合同进度
+FLD_C_NAME     = field_id_or("contract_info", "contract.name", "fld2JEyq9H")
+FLD_C_EMAIL    = field_id_or("contract_info", "contract.email", "fldYELKkKa")
+FLD_C_ID_NO    = field_id_or("contract_info", "contract.id_number", "fld3hdHuVd")
+FLD_C_BANK     = field_id_or("contract_info", "contract.bank_account_number", "fld7CGT1GH")
+FLD_C_ADDRESS  = field_id_or("contract_info", "contract.address", "fld8P0lZhg")
+FLD_C_BANK_NAME = field_id_or("contract_info", "contract.bank_account_name", "fldvZMzuk3")
+FLD_C_SWIFT    = field_id_or("contract_info", "contract.swift", "fld4ENGLJM")
+FLD_C_PROGRESS = field_id_or("contract_info", "contract.progress", "fldtXTkTTi")
 
 # 本地归档目录
 ARCHIVE_DIR = Path(get_paths(_CFG).get("contract_output", "~/Documents/loc-contracts/output/")) / "signed"
@@ -66,13 +73,10 @@ VALID_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".heic", ".webp"
 
 # ── lark-cli ──────────────────────────────────────────────────────────────────
 def lark_cli(*args):
-    r = subprocess.run(["lark-cli"] + list(args), capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"lark-cli 失败:\n{r.stderr.strip()}")
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"lark-cli 返回非 JSON:\n{r.stdout[:200]}")
+    resp = run_lark_cli_json(*args)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"lark-cli 返回非 JSON:\n{str(resp)[:200]}")
+    return resp
 
 def extract_text(val):
     if not val:
@@ -151,8 +155,9 @@ def analyze_with_vision(file_path: Path) -> dict:
             for i in pages:
                 page = doc[i]
                 pix  = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-                out  = ARCHIVE_DIR / f".tmp_{file_path.stem}_p{i+1}.png"
-                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+                tmp_dir = Path(tempfile.gettempdir()) / "loc-resume-contract-vision"
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                out  = tmp_dir / f".tmp_{file_path.stem}_p{i+1}.png"
                 pix.save(str(out))
                 img_paths.append(out)
             return {"status": "ok", "img_paths": img_paths, "total_pages": total}
@@ -180,8 +185,50 @@ def fetch_contract_info(candidate_name: str) -> dict | None:
                 "email":     extract_text(r["fields"].get(FLD_C_EMAIL)),
                 "id_no":     extract_text(r["fields"].get(FLD_C_ID_NO)),
                 "bank":      extract_text(r["fields"].get(FLD_C_BANK)),
+                "address":   extract_text(r["fields"].get(FLD_C_ADDRESS)),
+                "bank_name": extract_text(r["fields"].get(FLD_C_BANK_NAME)),
+                "swift":     extract_text(r["fields"].get(FLD_C_SWIFT)),
             }
     return None
+
+
+def normalize_for_compare(text: str) -> str:
+    """Normalize text for robust contract field matching."""
+    return re.sub(r"[\s,，.。:：;；/\\-]+", "", (text or "").lower())
+
+
+def contains_expected(text: str, expected: str) -> bool:
+    if not expected:
+        return True
+    return normalize_for_compare(expected) in normalize_for_compare(text)
+
+
+def extract_file_text(file_path: Path) -> str:
+    """Extract text from PDF for field-level diff checks."""
+    if file_path.suffix.lower() != ".pdf":
+        return ""
+    try:
+        import fitz
+        doc = fitz.open(str(file_path))
+        return "\n".join(page.get_text() for page in doc)
+    except Exception:
+        return ""
+
+
+def compare_contract_text(text: str, contract_info: dict | None) -> list[tuple[str, str]]:
+    """Return mismatched key fields found in signed contract text."""
+    if not contract_info or not text:
+        return []
+    checks = [
+        ("姓名", contract_info.get("name", "")),
+        ("邮箱", contract_info.get("email", "")),
+        ("证件号", contract_info.get("id_no", "")),
+        ("银行账号", contract_info.get("bank", "")),
+        ("地址", contract_info.get("address", "")),
+        ("账户名", contract_info.get("bank_name", "")),
+        ("SWIFT", contract_info.get("swift", "")),
+    ]
+    return [(label, value) for label, value in checks if value and not contains_expected(text, value)]
 
 # ── 归档 ─────────────────────────────────────────────────────────────────────
 def archive_file(src: Path, candidate_name: str) -> Path:
@@ -250,6 +297,7 @@ def main():
     vision_queue = []   # 需要视觉分析的文件
     vision_imgs  = []   # 所有提取出的签名页图片路径
     archived     = []
+    extracted_texts = []
 
     for f in files:
         print(f"\n▸ 文件：{f.name}")
@@ -277,6 +325,10 @@ def main():
         # 视觉分析准备
         vision_result = analyze_with_vision(f)
         vision_queue.append((f.name, vision_result))
+
+        extracted_text = extract_file_text(f)
+        if extracted_text:
+            extracted_texts.append((f.name, extracted_text))
 
     # ── 4. 视觉分析结果 ─────────────────────────────────────────────────────
     print()
@@ -312,8 +364,35 @@ def main():
         print(f"  邮箱：      {contract_info['email']}")
         print(f"  证件号：    {contract_info['id_no'] or '（未填）'}")
         print(f"  银行账号：  {contract_info['bank'] or '（未填）'}")
+        print(f"  地址：      {contract_info.get('address') or '（未填）'}")
+        print(f"  账户名：    {contract_info.get('bank_name') or '（未填）'}")
+        print(f"  SWIFT：     {contract_info.get('swift') or '（未填）'}")
     else:
         print(f"  ⚠️  合同信息收集表中未找到「{candidate_name}」，请人工核对")
+
+    print()
+    print("─" * 62)
+    print("🧾 自动字段 Diff（签回文件 vs Lark 合同信息）")
+    print("─" * 62)
+    if not extracted_texts:
+        print("  ⚠️  未能抽取合同文本，无法自动 diff，请人工核对")
+    elif not contract_info:
+        print("  ⚠️  无 Lark 合同信息，无法自动 diff，请人工核对")
+    else:
+        any_mismatch = False
+        for fname, text in extracted_texts:
+            mismatches = compare_contract_text(text, contract_info)
+            print(f"\n▸ {fname}")
+            if not mismatches:
+                print("  ✅ 关键字段均能在签回文件中匹配")
+            else:
+                any_mismatch = True
+                all_ok = False
+                print(f"  ❌ 发现 {len(mismatches)} 个关键字段不一致或未匹配：")
+                for label, expected in mismatches:
+                    print(f"    - {label}：Lark 期望「{expected}」")
+        if any_mismatch:
+            print("  结论：签回文件不应进入状态更新，请先确认是否拿错合同或合同信息表记录。")
 
     # ── 6. 核查摘要 ──────────────────────────────────────────────────────────
     print()
@@ -332,6 +411,15 @@ def main():
 
     if args.dry_run:
         print("\n[DRY-RUN] 不更新飞书状态")
+        log_manual_step(
+            step_name="签字合同核查 dry-run",
+            status="skipped" if all_ok else "failed",
+            candidate_name=candidate_name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"文件数: {len(files)}",
+            output_summary="格式/字段 diff 通过" if all_ok else "格式或字段 diff 未通过",
+            step_type="action" if all_ok else "error",
+        )
         return
 
     # ── 7. VM 确认 + 更新飞书 ────────────────────────────────────────────────
@@ -346,6 +434,15 @@ def main():
         FLD_STATUS: "✅ 合同已签署",
     })
     print("✅ 招募状态已更新为「✅ 合同已签署」")
+    log_manual_step(
+        step_name="签字合同状态更新",
+        status="done",
+        candidate_name=candidate_name,
+        candidate_record_id=target["record_id"],
+        input_summary=f"文件数: {len(files)}",
+        output_summary="状态=✅ 合同已签署",
+        decision="confirmed",
+    )
     print()
     print("下一步：")
     print("  1. VM 前往财务平台提交合同审批单 + 供应商信息入库单")

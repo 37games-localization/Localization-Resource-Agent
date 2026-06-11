@@ -31,6 +31,8 @@ from resume_screening_engine_v2 import ResumeScreeningEngineV2
 
 # ── 从 config.yaml 读取配置 ───────────────────────────────────────────────────
 from config_loader import load_config, get_lark
+from lark_cli_utils import run_lark_cli_json
+from manual_trace import log_manual_step
 
 _CFG       = load_config()
 _LARK      = get_lark(_CFG)
@@ -108,14 +110,7 @@ FLEX_MAP = {
 
 def lark_cli(*args):
     """调用 lark-cli，返回解析后的 JSON（或抛出异常）"""
-    cmd = ["lark-cli"] + list(args)
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"lark-cli 失败: {result.stderr.strip()}")
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return result.stdout.strip()
+    return run_lark_cli_json(*args)
 
 
 def fetch_all_records():
@@ -566,10 +561,38 @@ def main():
 
         try:
             write_record(rid, write_fields, dry_run)
-            print(f"  ✅ 写入成功\n")
+            if dry_run:
+                print(f"  ✅ DRY-RUN 预览完成（未写入飞书）\n")
+                log_manual_step(
+                    step_name="评分重算 dry-run",
+                    status="skipped",
+                    candidate_name=name,
+                    candidate_record_id=rid,
+                    input_summary=f"语言对: {candidate['语言对']}",
+                    output_summary=f"总分={final_score}, 档位={final_tier}, 有效简历={valid_label}",
+                )
+            else:
+                print(f"  ✅ 写入成功\n")
+                log_manual_step(
+                    step_name="评分重算写回",
+                    status="done",
+                    candidate_name=name,
+                    candidate_record_id=rid,
+                    input_summary=f"语言对: {candidate['语言对']}",
+                    output_summary=f"总分={final_score}, 档位={final_tier}, 有效简历={valid_label}",
+                )
             ok_count += 1
         except Exception as e:
             print(f"  ❌ 写入失败: {e}\n")
+            log_manual_step(
+                step_name="评分重算失败",
+                status="failed",
+                candidate_name=name,
+                candidate_record_id=rid,
+                input_summary=f"语言对: {candidate.get('语言对', '')}",
+                output_summary=str(e),
+                step_type="error",
+            )
             err_count += 1
 
         time.sleep(0.3)   # 飞书限流保护

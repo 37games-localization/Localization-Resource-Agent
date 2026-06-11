@@ -403,19 +403,67 @@ def write_record(record_id: str, fields: dict, dry_run: bool) -> bool:
 
 MAX_RETRIES = 3
 
+LLM_PROVIDER = _CFG.get("llm", {}).get("provider", "anthropic")
+
+def call_openai_compatible(prompt: str) -> str:
+    import ssl
+    import urllib.request
+    import urllib.error
+    try:
+        import certifi
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        ssl_context = ssl.create_default_context()
+
+    base_url = PROXY_URL.rstrip("/")
+    url = f"{base_url}/chat/completions"
+    payload = json.dumps(
+        {
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 2000,
+            "temperature": 0,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {PROXY_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90, context=ssl_context) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")[:300]
+        raise RuntimeError(f"OpenAI-compatible LLM HTTP {e.code}: {detail}") from e
+    return body["choices"][0]["message"]["content"].strip()
+
 def call_llm(prompt: str) -> dict | None:
-    import anthropic
-    client = anthropic.Anthropic(base_url=PROXY_URL, api_key=PROXY_KEY)
+    client = None
+    if LLM_PROVIDER not in {"deepseek", "openai_compatible"}:
+        import anthropic
+        client = anthropic.Anthropic(base_url=PROXY_URL, api_key=PROXY_KEY)
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            msg = client.messages.create(
-                model=LLM_MODEL,
-                max_tokens=2000,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            raw = msg.content[0].text.strip()
+            if LLM_PROVIDER in {"deepseek", "openai_compatible"}:
+                raw = call_openai_compatible(prompt)
+            else:
+                msg = client.messages.create(
+                    model=LLM_MODEL,
+                    max_tokens=2000,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                raw = msg.content[0].text.strip()
             raw = re.sub(r'^```[\w]*\n?', '', raw).strip()
             raw = re.sub(r'\n?```$', '', raw).strip()
             m = re.search(r'\{.*\}', raw, re.DOTALL)

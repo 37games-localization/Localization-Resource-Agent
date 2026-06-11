@@ -17,6 +17,9 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
+from field_resolver import field_id_or
+from lark_cli_utils import run_lark_cli_json
+from manual_trace import log_manual_step
 
 _CFG = load_config()
 
@@ -32,23 +35,38 @@ SMTP_PASS  = get_smtp(_CFG).get("password", "")
 TEST_MODE  = is_test_mode(_CFG)
 TEST_EMAIL = get_test_email(_CFG)
 
-FLD_NAME         = "fldSAfsOJf"
-FLD_EMAIL        = "fldWf5X8NR"
-FLD_LANG_PAIR    = "fldBvHUo5K"
-FLD_STATUS       = "fldfp6Pn7l"
-FLD_TEST_SENT_AT = "fldQLxyrP7"
+FLD_NAME         = field_id_or("candidate", "candidate.name", "fldSAfsOJf")
+FLD_EMAIL        = field_id_or("candidate", "candidate.email", "fldWf5X8NR")
+FLD_LANG_PAIR    = field_id_or("candidate", "candidate.language_pair", "fldBvHUo5K")
+FLD_STATUS       = field_id_or("candidate", "candidate.status", "fldfp6Pn7l")
+FLD_TEST_SENT_AT = field_id_or("candidate", "candidate.test_sent_at", "fldQLxyrP7")
 
 VALID_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".docx", ".doc", ".txt", ".xlsx"}
 
+LANG_HINTS = [
+    {
+        "tokens": ["中译韩", "中韩", "韩语", "Korean", "ko"],
+        "expected_any": ["韩", "Korean", "ko"],
+        "label": "中译韩/韩语",
+    },
+    {
+        "tokens": ["中译英", "中英", "英语", "English", "en"],
+        "expected_any": ["英", "English", "en"],
+        "label": "中译英/英语",
+    },
+    {
+        "tokens": ["中译日", "中日", "日语", "Japanese", "ja"],
+        "expected_any": ["日", "Japanese", "ja"],
+        "label": "中译日/日语",
+    },
+]
+
 # ── lark-cli ──────────────────────────────────────────────────────────────────
 def lark_cli(*args):
-    r = subprocess.run(["lark-cli"] + list(args), capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"lark-cli 失败:\n{r.stderr.strip()}")
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"非 JSON 返回:\n{r.stdout[:200]}")
+    resp = run_lark_cli_json(*args)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"非 JSON 返回:\n{str(resp)[:200]}")
+    return resp
 
 def extract_text(val):
     if not val: return ""
@@ -218,7 +236,7 @@ def summarize_attachment(file_path: Path) -> str:
     return f"【{ext.upper()} 文件】{file_path.name}，{size_kb} KB\n    （内容需 VM 自行确认正确）"
 
 # ── 邮件构建 ──────────────────────────────────────────────────────────────────
-def build_email(name: str, lang_pair: str, lang: str, attachment_name: str) -> tuple[str, str]:
+def build_email_content(name: str, lang_pair: str, lang: str, attachment_name: str) -> tuple[str, str]:
     if lang == "zh":
         subject = f"【Localization Team】翻译能力测试 - {name}"
         body = f"""您好，{name}，
@@ -256,7 +274,7 @@ Localization Team"""
     return subject, body
 
 # ── 发送邮件 ──────────────────────────────────────────────────────────────────
-def build_email(to_email: str, subject: str, body: str, attachment: Path):
+def build_email_message(to_email: str, subject: str, body: str, attachment: Path):
     """构建 MIMEMultipart 邮件对象（不发送）"""
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
@@ -290,7 +308,7 @@ def save_draft(msg, draft_dir: Path, filename: str):
 def send_email(to_email: str, subject: str, body: str, attachment: Path, draft: bool = False):
     import smtplib, ssl
 
-    msg, actual_to = build_email(to_email, subject, body, attachment)
+    msg, actual_to = build_email_message(to_email, subject, body, attachment)
 
     if draft:
         draft_dir = Path(get_paths(_CFG).get("contract_output", "~/Documents/loc-contracts/output/")).expanduser() / "drafts"
@@ -321,6 +339,19 @@ def list_records(records):
               f"{extract_text(f.get(FLD_EMAIL)):<32} "
               f"{extract_text(f.get(FLD_STATUS))}")
 
+
+def detect_attachment_language_warning(file_path: Path, attachment_summary: str, candidate_lang_pair: str) -> str:
+    """Return a warning when the attachment language signal conflicts with the candidate language pair."""
+    haystack = f"{file_path.name}\n{attachment_summary}"
+    for hint in LANG_HINTS:
+        if any(token.lower() in haystack.lower() for token in hint["tokens"]):
+            if not any(token.lower() in candidate_lang_pair.lower() for token in hint["expected_any"]):
+                return (
+                    f"附件疑似为「{hint['label']}」测试题，但候选人语言对是「{candidate_lang_pair}」。"
+                    "请确认是否选错测试题。"
+                )
+    return ""
+
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="测试题邮件发送")
@@ -331,6 +362,7 @@ def main():
     parser.add_argument("--dry-run",   action="store_true", help="预览但不发送")
     parser.add_argument("--yes",       action="store_true", help="跳过确认直接发送")
     parser.add_argument("--draft",     action="store_true", help="保存草稿而非直接发送，VM 双击 .eml 后点发送")
+    parser.add_argument("--allow-language-mismatch", action="store_true", help="允许附件语言方向与候选人语言对不一致")
     args = parser.parse_args()
 
     records = fetch_records()
@@ -349,6 +381,10 @@ def main():
     file_path = Path(args.file).expanduser().resolve()
     if not file_path.exists():
         print(f"❌ 文件不存在：{file_path}")
+        sys.exit(1)
+    if file_path.stat().st_size == 0:
+        print(f"❌ 文件为空：{file_path}")
+        print("   请重新下载或确认测试题附件后再发送，避免给候选人发送空文件。")
         sys.exit(1)
     if file_path.suffix.lower() not in VALID_EXTS:
         print(f"❌ 不支持的格式：{file_path.suffix}（支持：{' / '.join(VALID_EXTS)}）")
@@ -384,6 +420,10 @@ def main():
     # ── 附件摘要 ──────────────────────────────────────────────────────────────
     print("分析附件内容...")
     summary = summarize_attachment(file_path)
+    if "解析失败" in summary or "读取失败" in summary:
+        print(f"❌ 附件无法解析：{summary}")
+        print("   请重新下载或确认测试题附件后再发送，避免给候选人发送损坏文件。")
+        sys.exit(1)
 
     # 视觉模型处理（返回路径标记时由主 session image tool 完成）
     attachment_summary = summary
@@ -393,8 +433,10 @@ def main():
         print(f"__NEEDS_VISION__:{img_path}")
         attachment_summary = f"【附件预览待视觉分析】路径：{img_path}"
 
+    lang_warning = detect_attachment_language_warning(file_path, attachment_summary, lang_pair)
+
     # ── 构建邮件 ──────────────────────────────────────────────────────────────
-    subject, body = build_email(name, lang_pair, lang, file_path.name)
+    subject, body = build_email_content(name, lang_pair, lang, file_path.name)
 
     # ── 展示完整摘要 ──────────────────────────────────────────────────────────
     print("=" * 62)
@@ -412,11 +454,26 @@ def main():
     print(body)
     print("=" * 62)
 
+    if lang_warning:
+        print(f"\n⚠️  语言方向风险：{lang_warning}")
+        if not args.dry_run and not args.allow_language_mismatch:
+            print("❌ 已阻断发送。若确认要发送，请显式加 --allow-language-mismatch。")
+            sys.exit(1)
+
     if TEST_MODE:
         print(f"\n⚠️  [测试模式] 实际发到：{TEST_EMAIL}（而非 {email}）")
 
     if args.dry_run:
-        print("\n[DRY-RUN] 不发送"); return
+        print("\n[DRY-RUN] 不发送")
+        log_manual_step(
+            step_name="测试题邮件 dry-run",
+            status="skipped",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"附件: {file_path.name}; 语言对: {lang_pair}",
+            output_summary=f"收件人(TEST_MODE): {TEST_EMAIL if TEST_MODE else email}",
+        )
+        return
 
     if not args.yes:
         print()
@@ -433,6 +490,14 @@ def main():
         FLD_TEST_SENT_AT: int(time.time() * 1000),
     })
     print("✅ 招募状态 → 📤 测试中，测试发送时间已记录")
+    log_manual_step(
+        step_name="测试题邮件发送",
+        status="done",
+        candidate_name=name,
+        candidate_record_id=target["record_id"],
+        input_summary=f"附件: {file_path.name}; 语言对: {lang_pair}",
+        output_summary=f"发送至: {TEST_EMAIL if TEST_MODE else email}; 状态=📤 测试中",
+    )
 
 if __name__ == "__main__":
     main()

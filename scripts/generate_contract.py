@@ -20,6 +20,9 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
+from field_resolver import field_id_or
+from lark_cli_utils import run_lark_cli_json
+from manual_trace import log_manual_step
 from field_mapping import (
     FORM_BASE_TOKEN, FORM_TABLE_ID,
     ACCOUNT_TYPE_FIELD_ID,
@@ -47,40 +50,69 @@ OUTPUT_DIR = Path(get_paths(_CFG).get("contract_output", "~/Documents/loc-contra
 TEST_MODE  = is_test_mode(_CFG)
 TEST_EMAIL = get_test_email(_CFG)
 
-FLD_NAME      = "fld2JEyq9H"   # 姓名
-FLD_ACCT_NAME = "fldvZMzuk3"   # 个人账户户名（用于姓名校验）
-FLD_EMAIL     = "fldYELKkKa"   # 邮箱
-FLD_SIGNED    = "fldj4zCL5L"   # 合同签署 checkbox
-FLD_ID_SCAN   = "fldia8GcRh"   # 证件扫描件附件
+FLD_NAME      = field_id_or("contract_info", "contract.name", "fld2JEyq9H")
+FLD_ACCT_NAME = field_id_or("contract_info", "contract.bank_account_name", "fldvZMzuk3")
+FLD_EMAIL     = field_id_or("contract_info", "contract.email", "fldYELKkKa")
+FLD_SIGNED    = field_id_or("contract_info", "contract.signed_contract", "fldj4zCL5L")
+FLD_ID_SCAN   = field_id_or("contract_info", "contract.id_scan", "fldia8GcRh")
 
 
 # ── lark-cli 工具 ──────────────────────────────────────────────
 def lark(*args) -> dict:
-    r = subprocess.run(["lark-cli"] + list(args), capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"lark-cli 失败:\n{r.stderr.strip()}")
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"lark-cli 非 JSON:\n{r.stdout[:300]}")
+    resp = run_lark_cli_json(*args)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"lark-cli 非 JSON:\n{str(resp)[:300]}")
+    return resp
 
 
-def lark_download_attachment(file_token: str, dest: Path, base_token: str = None):
-    """下载飞书附件到本地路径，base_token 默认用合同信息收集表"""
-    token = base_token or COLLECT_BASE
+def lark_download_attachment(
+    file_token: str,
+    dest: Path,
+    *,
+    base_token: str,
+    table_id: str,
+    record_id: str,
+):
+    """下载飞书 Base 附件到本地路径。"""
     r = subprocess.run(
-        ["lark-cli", "base", "+attachment-download",
-         "--base-token", token,
+        ["lark-cli", "base", "+record-download-attachment",
+         "--base-token", base_token,
+         "--table-id", table_id,
+         "--record-id", record_id,
          "--file-token", file_token,
-         "--output", str(dest)],
-        capture_output=True, text=True
+         "--output", dest.name],
+        capture_output=True, text=True,
+        cwd=str(dest.parent),
     )
     if r.returncode != 0:
         raise RuntimeError(f"附件下载失败: {r.stderr.strip()}")
 
 
+def find_table_id_by_name(base_token: str, table_name: str) -> str:
+    """按表名查找 table_id，用于 config.yaml 中旧 table_id 失效时兜底。"""
+    try:
+        resp = lark("base", "+table-list", "--base-token", base_token, "--format", "json")
+    except Exception:
+        return ""
+    data = resp.get("data", resp)
+    raw_tables = []
+    for key in ("items", "tables", "table_list"):
+        if isinstance(data, dict) and isinstance(data.get(key), list):
+            raw_tables = data[key]
+            break
+    if not raw_tables and isinstance(resp.get("items"), list):
+        raw_tables = resp["items"]
+    for table in raw_tables:
+        name = table.get("name") or table.get("table_name") or ""
+        table_id = table.get("table_id") or table.get("id") or ""
+        if name == table_name and table_id:
+            return table_id
+    return ""
+
+
 # ── 记录拉取 ──────────────────────────────────────────────────
 def fetch_collect_records() -> list:
+    global COLLECT_TABLE
     records, page_token = [], None
     while True:
         args = ["base", "+record-list",
@@ -89,7 +121,16 @@ def fetch_collect_records() -> list:
                 "--format", "json", "--limit", "100"]
         if page_token:
             args += ["--page-token", page_token]
-        resp = lark(*args)
+        try:
+            resp = lark(*args)
+        except RuntimeError as e:
+            fallback_table = find_table_id_by_name(COLLECT_BASE, "合同信息收集")
+            if fallback_table and fallback_table != COLLECT_TABLE:
+                print(f"⚠️  合同信息表 ID 失效，已按表名 fallback：{fallback_table}")
+                COLLECT_TABLE = fallback_table
+                records, page_token = [], None
+                continue
+            raise e
         db = resp["data"]
         fids = db.get("field_id_list", db.get("fields", []))
         rids = db.get("record_id_list", [])
@@ -105,8 +146,17 @@ def fetch_collect_records() -> list:
 def fetch_template_records() -> list:
     resp = lark("base", "+record-list",
                 "--base-token", TEMPLATE_BASE,
-                "--table-id", TEMPLATE_TABLE)
+                "--table-id", TEMPLATE_TABLE,
+                "--format", "json")
     records = []
+    data = resp.get("data", {})
+    fids = data.get("field_id_list", data.get("fields", []))
+    rids = data.get("record_id_list", [])
+    rows = data.get("data", [])
+    if fids and rows:
+        for rid, row in zip(rids, rows):
+            records.append({"record_id": rid, "fields": dict(zip(fids, row))})
+        return records
     for rec in resp.get("data", {}).get("records", []):
         records.append(rec)
     return records
@@ -151,7 +201,7 @@ def match_template(template_records: list, contract_name: str) -> dict | None:
     return None
 
 
-def pick_template_for_candidate(template_records: list, fields: dict) -> tuple[dict | None, str]:
+def pick_template_for_candidate(template_records: list, fields: dict, auto_confirm: bool = False) -> tuple[dict | None, str]:
     """
     根据候选人账户类型自动推荐合同模板，VM 可直接回车确认或手动选择。
     """
@@ -187,7 +237,11 @@ def pick_template_for_candidate(template_records: list, fields: dict) -> tuple[d
         tag = "  ← 推荐" if i == 1 else ""
         print(f"  {i:>2}. {name}{tag}")
 
-    choice = input(f"\n请输入模板序号（直接回车使用推荐 [1]）: ").strip()
+    if auto_confirm:
+        print("\n--yes 模式：自动使用推荐模板 [1]")
+        choice = "1"
+    else:
+        choice = input(f"\n请输入模板序号（直接回车使用推荐 [1]）: ").strip()
     if choice == "":
         choice = "1"
     try:
@@ -230,9 +284,10 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
             "签署年": str(sd.year),
             "签署月": f"{sd.month:02d}",
             "签署日": f"{sd.day:02d}",
+            "甲方合同编号": "",
         }
     except ValueError:
-        auto_vals = {"签署年": "", "签署月": "", "签署日": ""}
+        auto_vals = {"签署年": "", "签署月": "", "签署日": "", "甲方合同编号": ""}
 
     for var in required_vars:
         key = f"{{{{{var}}}}}"   # "{{变量名}}"
@@ -261,7 +316,7 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
 
         # 4. 乙方签署 = 乙方姓名
         if var == "乙方签署":
-            val = extract_text(fields.get("fld2JEyq9H", ""))
+            val = extract_text(fields.get(COMMON_FORM_FIELDS["乙方姓名"], ""))
             var_map[key] = val
             (filled if val else empty).append(var)
             continue
@@ -362,7 +417,7 @@ def insert_id_scan(doc: Document, image_paths: list[Path]):
         print(f"  ✅ 插入图片：{img_path.name}（宽 {img_w_inches:.1f} 英寸）")
 
 
-def download_id_scan_images(fields: dict, tmpdir: Path) -> list[Path]:
+def download_id_scan_images(fields: dict, tmpdir: Path, record_id: str) -> list[Path]:
     """从飞书下载证件扫描件图片到临时目录，返回本地路径列表"""
     attachments = extract_attachments(fields.get(FLD_ID_SCAN, []))
     if not attachments:
@@ -374,7 +429,13 @@ def download_id_scan_images(fields: dict, tmpdir: Path) -> list[Path]:
         filename   = att.get("name", f"id_scan_{file_token[:8]}.jpg")
         dest = tmpdir / filename
         try:
-            lark_download_attachment(file_token, dest, base_token=COLLECT_BASE)  # 收集表 token
+            lark_download_attachment(
+                file_token,
+                dest,
+                base_token=COLLECT_BASE,
+                table_id=COLLECT_TABLE,
+                record_id=record_id,
+            )
             paths.append(dest)
             print(f"  ✅ 下载证件扫描件：{filename}")
         except Exception as e:
@@ -556,7 +617,11 @@ def main():
     print("\n拉取合同模板表...")
     template_records = fetch_template_records()
 
-    template_rec, template_name = pick_template_for_candidate(template_records, fields)
+    template_rec, template_name = pick_template_for_candidate(
+        template_records,
+        fields,
+        auto_confirm=args.yes or args.dry_run,
+    )
     if not template_rec:
         print("❌ 未选择模板，退出"); sys.exit(1)
 
@@ -621,7 +686,16 @@ def main():
                 sys.exit(0)
 
     if args.dry_run:
-        print("\n[DRY-RUN] 不生成文件"); return
+        print("\n[DRY-RUN] 不生成文件")
+        log_manual_step(
+            step_name="合同生成 dry-run",
+            status="skipped",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"模板: {template_name}",
+            output_summary=f"已填充 {len(filled)} 个变量; 空字段 {len(empty)}; 未匹配 {len(unmatched)}",
+        )
+        return
 
     # ── 下载模板 docx ──
     att_list = extract_attachments(template_rec.get("fields", {}).get(TEMPLATE_ATT_FLD, []))
@@ -633,13 +707,16 @@ def main():
         template_docx = tmpdir / att_list[0]["name"]
 
         print(f"\n下载模板：{att_list[0]['name']}")
-        # 用 base +attachment-download from TEMPLATE_BASE
+        # 下载 Base 附件需使用 record_id + file_token
         r = subprocess.run(
-            ["lark-cli", "base", "+attachment-download",
+            ["lark-cli", "base", "+record-download-attachment",
              "--base-token", TEMPLATE_BASE,
+             "--table-id", TEMPLATE_TABLE,
+             "--record-id", template_rec["record_id"],
              "--file-token", att_list[0]["file_token"],
-             "--output", str(template_docx)],
-            capture_output=True, text=True
+             "--output", template_docx.name],
+            capture_output=True, text=True,
+            cwd=str(template_docx.parent),
         )
         if r.returncode != 0:
             print(f"❌ 模板下载失败：{r.stderr}"); sys.exit(1)
@@ -652,7 +729,7 @@ def main():
         # ── 插入证件扫描件 ──
         if id_scans and not is_company:
             print("\n下载并插入证件扫描件...")
-            img_paths = download_id_scan_images(fields, tmpdir)
+            img_paths = download_id_scan_images(fields, tmpdir, target["record_id"])
             if img_paths:
                 insert_id_scan(doc, img_paths)
             else:
@@ -681,6 +758,14 @@ def main():
             print("   提示：这些位置在合同中将显示为空白或原始占位符。")
         else:
             print("✅ 二次检查通过：所有变量已替换完毕")
+            log_manual_step(
+                step_name="合同 docx 生成",
+                status="done",
+                candidate_name=name,
+                candidate_record_id=target["record_id"],
+                input_summary=f"模板: {template_name}",
+                output_summary=f"文件: {output_path}",
+            )
 
         import subprocess as sp
         sp.run(["open", str(output_path)])

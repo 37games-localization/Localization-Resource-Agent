@@ -19,6 +19,9 @@ update_status.py
 
     # 跳过确认
     python3 scripts/update_status.py --name "青木遥" --status "✅ 已入库" --yes
+
+    # 只预览，不写回
+    python3 scripts/update_status.py --name "青木遥" --status "✅ 已入库" --dry-run
 """
 
 import sys, json, argparse, subprocess
@@ -26,15 +29,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
+from field_resolver import field_id_or
+from lark_cli_utils import run_lark_cli_json
+from manual_trace import log_manual_step
 
 _CFG = load_config()
 
 BASE_TOKEN = get_lark(_CFG).get("base_token", "")
 TABLE_ID   = get_lark(_CFG).get("resume_table_id", "")
 
-FLD_NAME   = "fldSAfsOJf"
-FLD_EMAIL  = "fldWf5X8NR"
-FLD_STATUS = "fldfp6Pn7l"
+FLD_NAME   = field_id_or("candidate", "candidate.name", "fldSAfsOJf")
+FLD_EMAIL  = field_id_or("candidate", "candidate.email", "fldWf5X8NR")
+FLD_STATUS = field_id_or("candidate", "candidate.status", "fldfp6Pn7l")
 
 # 完整状态列表（顺序即流程顺序）
 ALL_STATUSES = [
@@ -57,13 +63,10 @@ ALL_STATUSES = [
 ]
 
 def lark_cli(*args):
-    r = subprocess.run(["lark-cli"] + list(args), capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"lark-cli 失败:\n{r.stderr.strip()}")
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"非 JSON 返回:\n{r.stdout[:200]}")
+    resp = run_lark_cli_json(*args)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"非 JSON 返回:\n{str(resp)[:200]}")
+    return resp
 
 def extract_text(val):
     if not val: return ""
@@ -109,6 +112,7 @@ def main():
     parser.add_argument("--status",         help="目标状态（见 --list-statuses）")
     parser.add_argument("--list",           action="store_true", help="列出所有候选人")
     parser.add_argument("--list-statuses",  action="store_true", help="列出所有可用状态")
+    parser.add_argument("--dry-run",        action="store_true", help="只预览不写回")
     parser.add_argument("--yes",            action="store_true", help="跳过确认")
     args = parser.parse_args()
 
@@ -186,6 +190,18 @@ def main():
     if curr_status == target_status:
         print("ℹ️  状态相同，无需更新"); return
 
+    if args.dry_run:
+        print("[DRY-RUN] 不写回飞书")
+        log_manual_step(
+            step_name="状态推进 dry-run",
+            status="skipped",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"当前状态: {curr_status}",
+            output_summary=f"目标状态: {target_status}",
+        )
+        return
+
     if not args.yes:
         ans = input("确认更新？[y/N] ").strip().lower()
         if ans != "y":
@@ -193,6 +209,15 @@ def main():
 
     update_record(target["record_id"], {FLD_STATUS: target_status})
     print(f"✅ 状态已更新：{curr_status} → {target_status}")
+    log_manual_step(
+        step_name="状态推进",
+        status="done",
+        candidate_name=name,
+        candidate_record_id=target["record_id"],
+        input_summary=f"当前状态: {curr_status}",
+        output_summary=f"目标状态: {target_status}",
+        decision="yes" if args.yes else "confirmed",
+    )
 
 if __name__ == "__main__":
     main()

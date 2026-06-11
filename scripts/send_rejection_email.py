@@ -17,6 +17,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
+from field_resolver import field_id_or
+from lark_cli_utils import run_lark_cli_json
+from manual_trace import log_manual_step
 
 _CFG = load_config()
 
@@ -32,19 +35,16 @@ SMTP_PASS  = get_smtp(_CFG).get("password", "")
 TEST_MODE  = is_test_mode(_CFG)
 TEST_EMAIL = get_test_email(_CFG)
 
-FLD_NAME   = "fldSAfsOJf"
-FLD_EMAIL  = "fldWf5X8NR"
-FLD_STATUS = "fldfp6Pn7l"
+FLD_NAME   = field_id_or("candidate", "candidate.name", "fldSAfsOJf")
+FLD_EMAIL  = field_id_or("candidate", "candidate.email", "fldWf5X8NR")
+FLD_STATUS = field_id_or("candidate", "candidate.status", "fldfp6Pn7l")
 
 # ── lark-cli ──────────────────────────────────────────────────────────────────
 def lark_cli(*args):
-    r = subprocess.run(["lark-cli"] + list(args), capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"lark-cli 失败:\n{r.stderr.strip()}")
-    try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"非 JSON 返回:\n{r.stdout[:200]}")
+    resp = run_lark_cli_json(*args)
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"非 JSON 返回:\n{str(resp)[:200]}")
+    return resp
 
 def extract_text(val):
     if not val: return ""
@@ -198,9 +198,16 @@ def main():
     # 状态检查：只有「已拒绝」才能发婉拒邮件
     if "拒绝" not in status and "reject" not in status.lower():
         print(f"⚠️  当前状态为「{status}」，不是「已拒绝」")
-        ans = input("确认仍要发送婉拒邮件？[y/N] ").strip().lower()
-        if ans != "y":
-            print("❌ 已取消"); sys.exit(0)
+        if args.dry_run:
+            print("[DRY-RUN] 仅预览风险，不要求交互确认。")
+        else:
+            try:
+                ans = input("确认仍要发送婉拒邮件？[y/N] ").strip().lower()
+            except EOFError:
+                print("❌ 非交互环境无法确认；请先把候选人状态改为「已拒绝」，或在人工确认后使用 --yes。")
+                sys.exit(1)
+            if ans != "y":
+                print("❌ 已取消"); sys.exit(0)
 
     subject, body = build_rejection_email(name, lang)
 
@@ -218,7 +225,16 @@ def main():
         print(f"\n⚠️  [测试模式] 实际发到：{TEST_EMAIL}（而非 {email}）")
 
     if args.dry_run:
-        print("\n[DRY-RUN] 不发送"); return
+        print("\n[DRY-RUN] 不发送")
+        log_manual_step(
+            step_name="婉拒邮件 dry-run",
+            status="skipped",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"当前状态: {status}",
+            output_summary=f"收件人(TEST_MODE): {TEST_EMAIL if TEST_MODE else email}",
+        )
+        return
 
     # 二次确认（防误操作核心）
     if not args.yes:
@@ -231,6 +247,15 @@ def main():
     print("\n发送中...")
     send_email(email, subject, body, draft=args.draft)
     print("✅ 婉拒邮件已发送")
+    log_manual_step(
+        step_name="婉拒邮件发送",
+        status="done",
+        candidate_name=name,
+        candidate_record_id=target["record_id"],
+        input_summary=f"当前状态: {status}",
+        output_summary=f"发送至: {TEST_EMAIL if TEST_MODE else email}",
+        decision="yes" if args.yes else "confirmed",
+    )
 
 if __name__ == "__main__":
     main()
