@@ -121,6 +121,7 @@ def main():
     parser.add_argument("--file",      metavar="PATH", help="测试题附件路径")
     parser.add_argument("--list",      action="store_true")
     parser.add_argument("--dry-run",   action="store_true", help="预览但不发送")
+    parser.add_argument("--prepare",   action="store_true", help="仅输出可复制邮件包，不发送、不写状态")
     parser.add_argument("--yes",       action="store_true", help="跳过确认直接发送")
     parser.add_argument("--draft",     action="store_true", help="保存草稿而非直接发送")
     parser.add_argument("--no-lark-log", action="store_true", help="不写飞书流程日志")
@@ -228,8 +229,12 @@ def main():
         if TEST_MODE:
             print(f"\n⚠️  [测试模式] 实际发到：{TEST_EMAIL}（而非 {email}）")
 
-        if args.dry_run:
-            wf.trace("跳过发送", output_summary="[DRY-RUN] 不发送", status=StepStatus.SKIPPED)
+        if args.dry_run or args.prepare:
+            wf.trace(
+                "跳过发送",
+                output_summary="[PREPARE] 不发送、不写状态" if args.prepare else "[DRY-RUN] 不发送",
+                status=StepStatus.SKIPPED,
+            )
             wf.summary()
             return
 
@@ -251,8 +256,12 @@ def main():
         if decision == "保存草稿":
             args.draft = True
     else:
-        if args.dry_run:
-            wf.trace("跳过发送", output_summary="[DRY-RUN] 不发送", status=StepStatus.SKIPPED)
+        if args.dry_run or args.prepare:
+            wf.trace(
+                "跳过发送",
+                output_summary="[PREPARE] 不发送、不写状态" if args.prepare else "[DRY-RUN] 不发送",
+                status=StepStatus.SKIPPED,
+            )
             wf.summary()
             return
 
@@ -260,6 +269,15 @@ def main():
     with wf.step("发送邮件", input_summary=f"→ {actual_to}  附件: {file_path.name}") as s:
         _send_email(email, subject, body, file_path, draft=args.draft)
         s.finish(output="草稿已保存" if args.draft else f"✅ 发送成功 → {actual_to}")
+
+    if args.draft:
+        wf.trace(
+            "跳过状态写回",
+            output_summary="本地草稿已保存；未发送，未写招募状态",
+            status=StepStatus.SKIPPED,
+        )
+        wf.summary()
+        return
 
     # ── Step 7: 更新飞书状态 ──────────────────────────────────────────────────
     with wf.step("更新飞书招募状态", input_summary=f"record: {target['record_id']}") as s:

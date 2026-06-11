@@ -21,7 +21,7 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
 from field_resolver import field_id_or
-from lark_cli_utils import run_lark_cli_json
+from lark_cli_utils import normalize_record_list_data, run_lark_cli_json
 from manual_trace import log_manual_step
 from field_mapping import (
     FORM_BASE_TOKEN, FORM_TABLE_ID,
@@ -55,6 +55,10 @@ FLD_ACCT_NAME = field_id_or("contract_info", "contract.bank_account_name", "fldv
 FLD_EMAIL     = field_id_or("contract_info", "contract.email", "fldYELKkKa")
 FLD_SIGNED    = field_id_or("contract_info", "contract.signed_contract", "fldj4zCL5L")
 FLD_ID_SCAN   = field_id_or("contract_info", "contract.id_scan", "fldia8GcRh")
+FLD_ID_NO     = field_id_or("contract_info", "contract.id_number", "fld3hdHuVd")
+FLD_BANK_NAME = field_id_or("contract_info", "contract.bank_name", "fldyPyrLdp")
+FLD_BANK_ADDR = field_id_or("contract_info", "contract.bank_address", "fldDLk0Jh9")
+FLD_CURRENCY  = field_id_or("contract_info", "contract.currency", "fldSZE1Shy")
 
 
 # ── lark-cli 工具 ──────────────────────────────────────────────
@@ -132,11 +136,7 @@ def fetch_collect_records() -> list:
                 continue
             raise e
         db = resp["data"]
-        fids = db.get("field_id_list", db.get("fields", []))
-        rids = db.get("record_id_list", [])
-        rows = db.get("data", [])
-        for rid, row in zip(rids, rows):
-            records.append({"record_id": rid, "fields": dict(zip(fids, row))})
+        records.extend(normalize_record_list_data(db))
         if not db.get("has_more") or not db.get("page_token"):
             break
         page_token = db["page_token"]
@@ -150,12 +150,8 @@ def fetch_template_records() -> list:
                 "--format", "json")
     records = []
     data = resp.get("data", {})
-    fids = data.get("field_id_list", data.get("fields", []))
-    rids = data.get("record_id_list", [])
-    rows = data.get("data", [])
-    if fids and rows:
-        for rid, row in zip(rids, rows):
-            records.append({"record_id": rid, "fields": dict(zip(fids, row))})
+    if data.get("data"):
+        records.extend(normalize_record_list_data(data))
         return records
     for rec in resp.get("data", {}).get("records", []):
         records.append(rec)
@@ -180,6 +176,39 @@ def extract_text(val) -> str:
     return text
 
 
+def is_china_id_number(text: str) -> bool:
+    """Return True for common mainland China resident ID format."""
+    value = extract_text(text).replace(" ", "")
+    return bool(re.fullmatch(r"\d{17}[\dXx]", value))
+
+
+def has_domestic_bank_signal(text: str) -> bool:
+    value = extract_text(text).lower()
+    markers = [
+        "中国", "china", "cn", "beijing", "shanghai", "guangzhou", "shenzhen",
+        "hangzhou", "nanjing", "chengdu", "wuhan", "xiamen", "anhui", "hefei",
+        "工商银行", "农业银行", "中国银行", "建设银行", "招商银行", "交通银行",
+        "邮储", "中信", "光大", "浦发", "兴业", "民生", "广发", "平安银行",
+    ]
+    return any(marker in value for marker in markers)
+
+
+def is_domestic_personal_account(fields: dict) -> bool:
+    acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
+    if not ("个人" in acct_type or "personal" in acct_type.lower()):
+        return False
+    currency = extract_text(fields.get(FLD_CURRENCY, ""))
+    id_no = extract_text(fields.get(FLD_ID_NO, ""))
+    bank_name = extract_text(fields.get(FLD_BANK_NAME, ""))
+    bank_addr = extract_text(fields.get(FLD_BANK_ADDR, ""))
+    return (
+        "人民币" in currency or "cny" in currency.lower() or
+        is_china_id_number(id_no) or
+        has_domestic_bank_signal(bank_name) or
+        has_domestic_bank_signal(bank_addr)
+    )
+
+
 def extract_attachments(val) -> list:
     """返回附件列表 [{name, file_token, size}]"""
     if not val or not isinstance(val, list):
@@ -189,6 +218,32 @@ def extract_attachments(val) -> list:
         if isinstance(item, dict) and item.get("file_token"):
             result.append(item)
     return result
+
+
+def open_docx(path: Path) -> bool:
+    """Open generated docx, preferring WPS when installed on macOS."""
+    candidates = []
+    wps_path = Path("/Applications/wpsoffice.app")
+    if wps_path.exists():
+        candidates.append(["open", "-a", str(wps_path), str(path)])
+    candidates.extend([
+        ["open", "-b", "com.kingsoft.wpsoffice.mac", str(path)],
+        ["open", str(path)],
+    ])
+    last_error = ""
+    for cmd in candidates:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            if "wpsoffice" in " ".join(cmd).lower():
+                print("✅ 已使用 WPS 打开合同预览")
+            else:
+                print("✅ 已打开合同预览")
+            return True
+        last_error = (result.stderr or result.stdout or "").strip()
+    print(f"⚠️  自动打开失败，请手动打开：{path}")
+    if last_error:
+        print(f"   系统返回：{last_error}")
+    return False
 
 
 # ── 模板匹配 ──────────────────────────────────────────────────
@@ -207,6 +262,7 @@ def pick_template_for_candidate(template_records: list, fields: dict, auto_confi
     """
     acct_type = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
     is_company_acct = "公司" in acct_type or "Business" in acct_type
+    is_domestic_personal = is_domestic_personal_account(fields)
 
     available = []
     for rec in template_records:
@@ -224,10 +280,16 @@ def pick_template_for_candidate(template_records: list, fields: dict, auto_confi
     # 按账户类型打分排序（最匹配的排最前）
     def score(name):
         s = 0
+        lowered = name.lower()
         if is_company_acct and ("公司" in name or "Business" in name or "company" in name.lower()):
             s += 10
         if not is_company_acct and "公司" not in name and "Business" not in name:
             s += 5
+        if is_domestic_personal:
+            if "境内个人" in name or "人民币" in name:
+                s += 30
+            if "外币" in name or "境外" in name or "foreign" in lowered:
+                s -= 20
         return s
 
     available.sort(key=lambda x: score(x[1]), reverse=True)
@@ -767,22 +829,17 @@ def main():
                 output_summary=f"文件: {output_path}",
             )
 
-        import subprocess as sp
-        sp.run(["open", str(output_path)])
+        open_docx(output_path)
 
         # ── 发送邮件 ──
         if args.send:
             lang = "zh" if re.search(r'[\u4e00-\u9fff]', name) else "en"
             print(f"\n发送邮件（语言：{lang}）...")
             send_email(email_addr, name, output_path, lang=lang, draft=args.draft)
-            # 写回飞书
-            payload = json.dumps({FLD_SIGNED: True}, ensure_ascii=False)
-            lark("base", "+record-upsert",
-                 "--base-token", COLLECT_BASE,
-                 "--table-id", COLLECT_TABLE,
-                 "--record-id", target["record_id"],
-                 "--json", payload)
-            print("✅ 飞书「合同签署」已勾选")
+            if args.draft:
+                print("📝 已保存本地合同邮件草稿，不更新「合同签署」字段。")
+            else:
+                print("✅ 合同邮件已发送；「合同签署」字段等待签回核查节点更新。")
         else:
             print(f"\n合同已打开预览，确认无误后运行：")
             print(f"  python3 scripts/generate_contract.py --name '{name}' --send")

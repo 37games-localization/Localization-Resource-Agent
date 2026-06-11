@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
 from field_resolver import field_id_or
-from lark_cli_utils import run_lark_cli_json
+from lark_cli_utils import normalize_record_list_data, run_lark_cli_json
 from manual_trace import log_manual_step
 
 _CFG = load_config()
@@ -51,7 +51,10 @@ def extract_text(val):
     if isinstance(val, list):
         parts = []
         for v in val:
-            parts.append(v.get("name") or v.get("text") or "" if isinstance(v, dict) else str(v))
+            if isinstance(v, dict):
+                parts.append(v.get("name") or v.get("text") or "")
+            else:
+                parts.append(str(v))
         text = " ".join(p for p in parts if p).strip()
     else:
         text = str(val).strip()
@@ -68,9 +71,7 @@ def fetch_records():
             args += ["--page-token", page_token]
         resp = lark_cli(*args)
         db = resp["data"]
-        fids = db.get("field_id_list", db.get("fields", []))
-        for rid, row in zip(db.get("record_id_list", []), db.get("data", [])):
-            records.append({"record_id": rid, "fields": dict(zip(fids, row))})
+        records.extend(normalize_record_list_data(db))
         if not db.get("has_more") or not db.get("page_token"):
             break
         page_token = db["page_token"]

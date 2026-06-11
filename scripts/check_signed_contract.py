@@ -40,7 +40,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
 from field_resolver import field_id_or
-from lark_cli_utils import run_lark_cli_json
+from lark_cli_utils import normalize_record_list_data, run_lark_cli_json
 from manual_trace import log_manual_step
 
 _CFG = load_config()
@@ -107,11 +107,7 @@ def fetch_records(table_id):
             args += ["--page-token", page_token]
         resp = lark_cli(*args)
         db = resp["data"]
-        field_ids  = db.get("field_id_list", db.get("fields", []))
-        record_ids = db.get("record_id_list", [])
-        rows       = db.get("data", [])
-        for rid, row in zip(record_ids, rows):
-            records.append({"record_id": rid, "fields": dict(zip(field_ids, row))})
+        records.extend(normalize_record_list_data(db))
         if not db.get("has_more") or not db.get("page_token"):
             break
         page_token = db["page_token"]

@@ -18,7 +18,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
 from field_resolver import field_id_or
-from lark_cli_utils import run_lark_cli_json
+from lark_cli_utils import normalize_record_list_data, run_lark_cli_json
 from manual_trace import log_manual_step
 
 _CFG = load_config()
@@ -73,7 +73,10 @@ def extract_text(val):
     if isinstance(val, list):
         parts = []
         for v in val:
-            parts.append(v.get("name") or v.get("text") or "" if isinstance(v, dict) else str(v))
+            if isinstance(v, dict):
+                parts.append(v.get("name") or v.get("text") or "")
+            else:
+                parts.append(str(v))
         text = " ".join(p for p in parts if p).strip()
     else:
         text = str(val).strip()
@@ -91,9 +94,7 @@ def fetch_records():
             args += ["--page-token", page_token]
         resp = lark_cli(*args)
         db = resp["data"]
-        fids = db.get("field_id_list", db.get("fields", []))
-        for rid, row in zip(db.get("record_id_list", []), db.get("data", [])):
-            records.append({"record_id": rid, "fields": dict(zip(fids, row))})
+        records.extend(normalize_record_list_data(db))
         if not db.get("has_more") or not db.get("page_token"):
             break
         page_token = db["page_token"]
@@ -360,6 +361,7 @@ def main():
     parser.add_argument("--file",      metavar="PATH", help="测试题附件路径")
     parser.add_argument("--list",      action="store_true")
     parser.add_argument("--dry-run",   action="store_true", help="预览但不发送")
+    parser.add_argument("--prepare",   action="store_true", help="仅输出可复制邮件包，不发送、不写状态")
     parser.add_argument("--yes",       action="store_true", help="跳过确认直接发送")
     parser.add_argument("--draft",     action="store_true", help="保存草稿而非直接发送，VM 双击 .eml 后点发送")
     parser.add_argument("--allow-language-mismatch", action="store_true", help="允许附件语言方向与候选人语言对不一致")
@@ -475,6 +477,18 @@ def main():
         )
         return
 
+    if args.prepare:
+        print("\n[PREPARE] 已生成邮件包，不发送、不写入飞书状态")
+        log_manual_step(
+            step_name="测试题邮件准备",
+            status="skipped",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"附件: {file_path.name}; 语言对: {lang_pair}",
+            output_summary="已输出邮件标题、正文、附件路径；未发送，未写状态",
+        )
+        return
+
     if not args.yes:
         print()
         ans = input("确认发送以上邮件（含附件）？[y/N] ").strip().lower()
@@ -483,6 +497,18 @@ def main():
 
     print("\n发送中...")
     send_email(email, subject, body, file_path, draft=args.draft)
+
+    if args.draft:
+        print("📝 已保存本地草稿，不更新飞书状态；VM 发送后请再推进状态。")
+        log_manual_step(
+            step_name="测试题邮件草稿",
+            status="skipped",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"附件: {file_path.name}; 语言对: {lang_pair}",
+            output_summary="本地 .eml 草稿已保存；未发送，未写状态",
+        )
+        return
 
     print("更新飞书状态...")
     update_record(target["record_id"], {

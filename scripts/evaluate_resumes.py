@@ -32,6 +32,7 @@ except ImportError:
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_lark, get_llm_api_key
+from lark_cli_utils import normalize_record_list_data
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
 _CFG        = load_config()
@@ -347,12 +348,9 @@ def fetch_all_records() -> list[dict]:
             args += ["--page-token", page_token]
         resp = lark_cli(*args)
         db = resp.get("data", {})
-        field_names = db.get("fields", [])
-        record_ids  = db.get("record_id_list", [])
-        rows        = db.get("data", [])
-        for rid, row in zip(record_ids, rows):
-            records.append({"record_id": rid, "fields": dict(zip(field_names, row))})
-        print(f"  第{page}页：{len(record_ids)} 条，累计 {len(records)} 条")
+        page_records = normalize_record_list_data(db)
+        records.extend(page_records)
+        print(f"  第{page}页：{len(page_records)} 条，累计 {len(records)} 条")
         if not db.get("has_more"):
             break
         page_token = db.get("page_token")
@@ -538,6 +536,22 @@ def hard_validate_price(result: dict, price_rule: dict) -> list[str]:
     return warnings
 
 
+def clamp_final_score(result: dict) -> tuple[dict, float, bool]:
+    """Cap final_score to 0-100 before writing to Lark."""
+    raw_score = result.get("final_score", 0)
+    try:
+        raw_num = float(raw_score)
+    except (TypeError, ValueError):
+        raw_num = 0.0
+    capped = max(0.0, min(100.0, raw_num))
+    if capped.is_integer():
+        capped_value = int(capped)
+    else:
+        capped_value = round(capped, 1)
+    result["final_score"] = capped_value
+    return result, raw_num, capped_value != raw_num
+
+
 # ── 构建 prompt ───────────────────────────────────────────────────────────────
 
 def build_prompt(rec: dict, price_rule: dict | None) -> str:
@@ -671,6 +685,8 @@ def main():
             err_count += 1
             continue
 
+        result, raw_final_score, score_was_capped = clamp_final_score(result)
+
         # 价格硬校验
         if price_rule:
             warnings = hard_validate_price(result, price_rule)
@@ -686,14 +702,23 @@ def main():
               f"有效={result.get('is_valid_resume','?')}  "
               f"字数来源=[{result.get('word_count_source','?')}]  "
               f"置信度=[{result.get('confidence','?')}]")
+        if score_was_capped:
+            print(f"  ⚠️  LLM 原始总分 {raw_final_score:g}，按满分规则封顶为 {result.get('final_score',0)}")
 
         # 构建写回字段
         now_ms = int(time.time() * 1000)
+        final_line = (
+            f"最终：{result.get('initial_score',0)} + {result.get('bonus',0)} - {result.get('penalty',0)} = "
+            f"{raw_final_score:g}分"
+        )
+        if score_was_capped:
+            final_line += f"，按满分规则封顶为 {result.get('final_score',0)}分"
+        final_line += f" → {result.get('tier','?')}档"
         basis_text = (
             f"【价格维度 {result.get('price_score',0)}/50】\n{result.get('price_score_basis','')}\n\n"
             f"【资历维度 {result.get('exp_score',0)}/50】\n{result.get('exp_score_basis','')}\n\n"
             f"【加减分 +{result.get('bonus',0)} -{result.get('penalty',0)}】\n{result.get('bonus_penalty_basis','')}\n\n"
-            f"最终：{result.get('initial_score',0)} + {result.get('bonus',0)} - {result.get('penalty',0)} = {result.get('final_score',0)}分 → {result.get('tier','?')}档"
+            f"{final_line}"
         )
 
         write_fields = {

@@ -27,7 +27,7 @@ from generate_contract import (
     TEMPLATE_VARS_FLD, TEMPLATE_ATT_FLD, VM_INPUT_VARS,
     lark, lark_download_attachment,
     fetch_collect_records, fetch_template_records,
-    extract_text, extract_attachments,
+    extract_text, extract_attachments, open_docx,
     match_template, pick_template_for_candidate, is_company_contract,
     build_var_map, parse_required_vars,
     replace_para, fill_template_vars, insert_id_scan, download_id_scan_images,
@@ -239,7 +239,7 @@ def main():
             doc.save(output_path)
             s.finish(output=str(output_path))
 
-        sp.run(["open", str(output_path)])
+        open_docx(output_path)
 
         # ── Step 10: 发送邮件（可选）─────────────────────────────────────────
         if args.send or (not args.yes and not args.dry_run):
@@ -268,15 +268,16 @@ def main():
                 send_email(email_addr, name, output_path, lang=lang, draft=args.draft)
                 s.finish(output="草稿已保存" if args.draft else f"✅ 发送成功")
 
-            # ── Step 11: 更新飞书状态 ─────────────────────────────────────────
-            with wf.step("更新飞书合同状态", input_summary=f"record: {target['record_id']}") as s:
-                payload = json.dumps({FLD_SIGNED: True}, ensure_ascii=False)
-                lark("base", "+record-upsert",
-                     "--base-token", COLLECT_BASE,
-                     "--table-id",   COLLECT_TABLE,
-                     "--record-id",  target["record_id"],
-                     "--json",       payload)
-                s.finish(output="飞书「合同签署」已勾选")
+            wf.trace(
+                "合同邮件状态",
+                input_summary=f"record: {target['record_id']}",
+                output_summary=(
+                    "本地草稿已保存；未更新「合同签署」字段"
+                    if args.draft else
+                    "合同邮件已发送；「合同签署」字段等待签回核查节点更新"
+                ),
+                status=StepStatus.SKIPPED if args.draft else StepStatus.DONE,
+            )
         else:
             print(f"\n合同已打开预览，确认无误后运行：")
             print(f"  python3 scripts/generate_contract_v2.py --name '{name}' --send")
