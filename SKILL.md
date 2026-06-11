@@ -287,7 +287,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 **文件**：`config/resume_screening_rules_v2.json`
 
 这里存着**各语言对的目标价 + 上限价**，评分引擎用它判断资源商报价是否合理。**市场行情变了就需要来改**。
-`scripts/pricing_rules.json` 仅保留为历史/参考文件；主评分流程默认读取本文件中的 `price_rules`。
+历史价格规则已归档到 `references/legacy-pricing-rules-2026-05-28.json`，仅用于追溯；主评分流程默认读取本文件中的 `price_rules`。
 
 目前配置示例：
 | 语言对 | AIPE 目标价 | 翻译 目标价 |
