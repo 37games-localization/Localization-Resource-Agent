@@ -123,6 +123,8 @@ cp config.example.yaml config.local.yaml
 
 详细引导见 [`references/onboarding.md`](references/onboarding.md)
 
+v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-11.md`](references/v2.4-release-notes-2026-06-11.md)
+
 ---
 
 ## 更新日志
