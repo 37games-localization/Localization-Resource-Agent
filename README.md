@@ -1,6 +1,6 @@
 # 本地化资源管理 Agent
 
-> Localization Resource Agent · 当前版本：v2.5
+> Localization Resource Agent · 当前版本：v2.6
 
 覆盖外部译者从**投简历到正式入库**的完整招募链路，通过自然语言指令驱动，飞书多维表格作为数据中枢。当前版本已进入生产端验证闭环：单点能力可独立调用，关键节点有日志/人工确认/安全准备模式，Badcase 可回流到 GitHub issue 追踪修复。
 
@@ -26,11 +26,54 @@
 
 ---
 
+## Agent 架构
+
+这不是一个依赖聊天上下文记忆的长流程 Agent，而是一个“自然语言入口 + 确定性脚本 + Lark 状态机”的业务系统。
+
+```text
+VM 自然语言
+  ↓
+稳定唤起 Router（识别资源管理 Agent / step / 候选人 / 缺失信息）
+  ↓
+Lark 读取真实状态（候选人、合同、评分规则、workflow_log）
+  ↓
+单点脚本执行（简历解析、评分、测试题、合同、签字核查、状态推进）
+  ↓
+checkpoint 人工确认（高风险动作暂停）
+  ↓
+Lark 写回状态、结果、日志、Badcase 快照
+  ↓
+trace/span + eval + issue 回归，支持审计和持续迭代
+```
+
+核心边界：
+
+- Lark 是唯一事实来源，Agent 不靠上下文记住候选人状态。
+- Router 只负责识别意图和前置条件，不重写评分、合同选择、邮件生成等业务逻辑。
+- 单点脚本可以独立调用，也可以被 workflow 串联调用。
+- workflow/runtime 层只做过程可见、checkpoint、日志、恢复和回放，不替代人工确认。
+- Badcase 会进入统一脱敏快照和 GitHub issue 协议，变成可追踪的迭代资产。
+
+## 如何制作这类 Agent
+
+这个项目沉淀的是一套制作业务 Agent 的方法，而不只是脚本集合：
+
+1. 先把业务状态外置到数据库或 Lark，避免让 LLM 充当状态机。
+2. 把每个业务节点做成可单独运行、可重跑、可 dry-run 的脚本。
+3. 只在需要判断、解析、归纳的节点使用 LLM，结果立刻写回结构化字段。
+4. 增加稳定唤起 Router，让用户可以用自然语言切入任意 step。
+5. 给高风险节点加 checkpoint，必须人工确认后再继续。
+6. 为每次执行写 workflow_log，并映射为 trace/span，支持回放和审计。
+7. 把 Badcase 脱敏后自动转成 GitHub issue，再沉淀为 eval 回归用例。
+8. 每次改动后跑 eval/regression report，区分主流程改动、旁路观测和文档改动。
+
+这套方法适合迁移到其他“多步骤、跨天、多人协同、需要人工确认”的业务 Agent。
+
+---
+
 ## Badcase 回流机制
 
 类似 macOS 崩溃上报 / Sentry 一键上报的逻辑：**VM 感知到问题，标记一下，上下文自动收集**。
-
-### VM 只需要自然语言告诉 Agent
 
 ```
 把这个标成 badcase，应该进人工复核，不该直接婉拒
@@ -38,19 +81,7 @@
 刚才那封邮件标成 badcase，语气太硬
 ```
 
-### 系统自动完成
-
-```
-VM 自然语言告诉 Agent
-  ↓
-Agent 生成脱敏快照 JSON（脱敏处理：真实姓名/邮箱/电话/证件全部移除）
-  ↓
-自动上传到飞书表「Badcase快照」附件字段
-  ↓
-项目负责人从飞书读取快照 → 按统一模板开 GitHub issue → 追踪修复
-```
-
-VM 不需要任何 GitHub 权限，不需要写技术复盘，不需要整理截图和日志。
+Agent 会按统一协议生成脱敏快照，移除真实姓名、邮箱、电话、证件、银行和合同敏感信息。配置 GitHub 权限后，可以自然语言要求 Agent 按统一模板创建 issue；没有 GitHub 权限时，也会生成可提交的 snapshot / issue 草稿。
 
 ---
 
@@ -71,6 +102,10 @@ git checkout main
 也可以下载 `.skill` 文件后解压到 `~/.agents/skills/loc-resume-screening/`。
 
 Windows 用户如果不确定怎么装，直接让 Agent 按 onboarding 指引带着配置，不需要先理解 WSL / 依赖 / 路径差异。
+
+### Docker 说明
+
+当前推荐仍是本机安装 skill：它需要访问本地简历附件、合同模板、邮件草稿、Lark CLI / GitHub CLI 登录态，以及 OpenClaw / Codex 的本机 Agent 环境。Docker 更适合后续做公开版的一键 demo、CI eval、或部署独立前后端服务；不建议作为 VM 当前日常使用的首选安装方式。
 
 ---
 
@@ -102,6 +137,16 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 ---
 
 ## 更新日志
+
+### v2.6（2026-06-12）
+**稳定唤起 Router + Agent 治理演示包**
+
+- ✨ 新增稳定唤起协议：首次进入资源管理任务需要明确唤起 Agent，短期 session 内可承接“附件用这个”“确认发送”等续接指令。
+- ✨ 新增 `agent_router.py`：识别自然语言中的 step、候选人、record_id、附件、目标状态和 Badcase 期望结果；缺信息时停止并提示，不猜测执行。
+- ✨ 明确 runtime / workflow 边界：Router 负责入口识别，workflow/runtime 负责过程可见、checkpoint、日志与回放，核心业务仍由已验收单点脚本执行。
+- ✨ 新增 `trace_span.py` 和 `run_governance_demo.py`：可生成 workflow、Badcase、trace/span、eval 四合一治理 demo 包和 MP4。
+- 🛡️ 更新 README 的 Agent 架构与制作方法，说明如何把业务 Agent 做成可交接、可审计、可持续迭代的系统。
+- ✅ 验证：Agent 治理 eval PASS；隐私扫描 PASS；最终 demo 包 PASS。
 
 ### v2.5（2026-06-12）
 **评分规则治理 + 全语种覆盖回归**
@@ -207,10 +252,13 @@ loc-resume-screening/
 │   ├── parse_resumes.py        # 简历解析（LLM）
 │   ├── evaluate_resumes.py     # LLM 一次性解析+评分（可选路径）
 │   ├── rescore_and_write.py    # 重算评分并写回飞书
+│   ├── agent_router.py         # 稳定唤起与自然语言 step 路由
 │   ├── pricing_rules.py        # 读取 Lark 评分规则配置表
+│   ├── trace_span.py           # 标准 trace/span 结构与脱敏
 │   ├── eval_runner.py          # Agent 治理 eval 统一入口
 │   ├── replay_run.py           # Agent run_id / eval_report 回放
 │   ├── run_fixture_demo.py     # 脱敏最终演示测试集 runner
+│   ├── run_governance_demo.py  # 最终治理 demo 包与 MP4 生成
 │   ├── verify_pricing_rule_coverage.py # 检查 Lark 评分规则主流市场覆盖
 │   ├── workflow_runner.py      # 手动串联入口
 │   ├── workflow_engine.py      # 过程日志/人工确认基础能力
@@ -235,4 +283,4 @@ loc-resume-screening/
 
 ## 维护联系
 
-有问题找 penny（本地化工具管理者）或在仓库提 Issue。
+有问题请在仓库提交 Issue，或联系项目维护者。
