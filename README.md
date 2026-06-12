@@ -87,8 +87,6 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 
 ---
 
----
-
 ## 前端工作台
 
 VM 安装并完成配置后，可以直接对 Agent 说：
