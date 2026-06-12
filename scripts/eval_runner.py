@@ -77,6 +77,12 @@ EVAL_CASES = [
         kind="change_impact_eval",
         allow_changed=True,
     ),
+    EvalCase(
+        case_id="demo_fixture_matrix",
+        title="最终演示虚拟测试集矩阵",
+        command=[sys.executable, "scripts/run_fixture_demo.py"],
+        kind="demo_fixture_eval",
+    ),
 ]
 
 

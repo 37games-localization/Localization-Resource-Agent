@@ -61,6 +61,7 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `schema_validator.py` | 生产表准入校验：表头识别、缺列/多列/类型差异、生成字段映射 | 「检查这张Lark表能不能用」「更换生产表」 |
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
 | `run_testmode_demo.py` | 真实 TEST_MODE demo 证据采集：调用现有脚本并保存 transcript/summary | 「跑一遍真实测试demo」「录制前验证」 |
+| `run_fixture_demo.py` | 最终演示虚拟测试集矩阵：脱敏候选人、多分支 checkpoint、trace/span 证据 | 「跑一遍演示测试集」「检查最终demo素材」 |
 | `integration_readiness.py` | v2 分步骤集成验收：只读检查原脚本、v2包装、schema映射，不执行业务动作 | 「检查v2现在能不能进入生产验证」「做一轮集成验收」 |
 | `eval_runner.py` | Agent 治理 eval：统一运行回归、规则覆盖、集成验收、隐私扫描并输出 JSON/Markdown 证据 | 「跑一轮 Agent 治理 eval」 |
 | `replay_run.py` | Agent 运行回放：按 run_id 或 eval_report 重建 trace/span 时间线 | 「回放这次 Agent 运行」「按 run_id 看执行过程」 |
@@ -132,6 +133,21 @@ python3 scripts/eval_runner.py
 - `*.stdout.txt` / `*.stderr.txt`：各检查命令证据。
 
 Eval runner 只做准入/QA，不写 Lark、不发邮件、不生成真实合同、不推进状态。`pass` 表示检查通过；`changed` 表示检查命令通过但存在需要关注的变更影响面；`fail` 表示不能宣称本轮稳定。
+
+### 最终 Demo Fixture 矩阵
+
+对外演示和 6/15 最终录制使用脱敏虚拟测试集，不直接使用生产简历、合同或收款信息：
+
+```bash
+python3 scripts/run_fixture_demo.py
+```
+
+输出目录默认在 `~/.loc-resume-demo-fixture-runs/YYYYMMDD-HHMMSS/`，包含：
+- `summary.md`：S/A/B/C、测试邮件、合同、badcase 的演示矩阵摘要。
+- `transcript.txt`：可用于终端录制的自然语言输入与 Agent 输出。
+- `fixture_demo_report.json`：含脱敏 trace/span，可被回放和审计。
+
+Fixture 设计见 [`references/demo-fixture-matrix.md`](references/demo-fixture-matrix.md)。它只验证演示/治理路径，不写 Lark、不发邮件、不生成生产合同、不推进真实状态。
 
 ### Trace / Span 回放
 
@@ -620,12 +636,12 @@ AI 回复：✅ 已写入飞书，李全鸿档位 S，优先录用。
 
 ### v2.2（2026-05-28）
 - ✨ 新增草稿模式（`--draft`）：三个发邮件脚本均支持，生成 `.eml` 文件保存到本地，VM 双击用邮件客户端打开后自行点发送
-- 🐛 修复 `send_test_email.py` / `send_rejection_email.py` 邮件落款残留「青木遥 / LOC Demo Vendor」问题
+- 🐛 修复 `send_test_email.py` / `send_rejection_email.py` 邮件落款残留个人姓名 / 旧供应商主体信息问题
 - 📝 草稿保存路径：`contract_output/drafts/`（在 config.local.yaml 中配置）
 
 ### v2.1（2026-05-28）
-- 🐛 修复发件人显示名（去除「青木遥」，改为裸邮箱地址，避免触发 spam 过滤）
-- 🐛 修复邮件标题残留「LOC Demo Vendor」，统一改为「Localization Team」
+- 🐛 修复发件人显示名（去除个人姓名，改为裸邮箱地址，避免触发 spam 过滤）
+- 🐛 修复邮件标题残留旧供应商主体信息，统一改为团队级别标题
 - ♻️ 所有 base_token / table_id 从本机配置读取，不再硬编码
 - ✨ 合同模板自动推荐（按账户类型打分排序，直接回车使用推荐）
 - ✨ 变量填充三层状态报告（已填充 / 值为空 / 映射表无此变量）+ 生成后残留二次检查

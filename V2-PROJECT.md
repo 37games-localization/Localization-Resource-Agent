@@ -180,7 +180,7 @@ python3 scripts/workflow_runner.py resume --token *** --decision "写入"
 {
   "agent": "loc-resource-management",
   "candidate": "青木遥",
-  "record_id": "20260520-08",
+  "record_id": "DEMO-JA-0001",
   "current_step": "test-email",
   "waiting_for": "attachment",
   "expires_at": "30 minutes",

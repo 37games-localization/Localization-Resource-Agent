@@ -51,6 +51,7 @@ OBSERVATION_LAYER = {
     "scripts/send_test_email_v2.py": "测试题邮件可视化包装层",
     "scripts/generate_contract_v2.py": "合同生成可视化包装层",
     "scripts/run_testmode_demo.py": "Demo 证据采集工具",
+    "scripts/run_fixture_demo.py": "脱敏最终演示 fixture runner，只生成旁路证据和 checkpoint transcript",
 }
 
 SCHEMA_AND_QA = {
@@ -131,6 +132,13 @@ def classify(path: str) -> dict:
             "label": "规则/测试",
             "reason": "评分规则或测试用例会影响评分结果判断",
             "required_qa": "必须跑 tests/run_tests.py，并抽样验证真实候选人评分",
+        }
+    if path.startswith("demo_fixtures/"):
+        return {
+            "impact": "observation",
+            "label": "旁路观测",
+            "reason": "脱敏演示测试集，不写 Lark、不发送邮件、不改变主流程",
+            "required_qa": "必须跑 scripts/run_fixture_demo.py，并确认 fixture 预期与真实评分引擎输出一致",
         }
     if path.startswith(DOC_PREFIXES):
         return {

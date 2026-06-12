@@ -59,14 +59,14 @@ VM 不需要任何 GitHub 权限，不需要写技术复盘，不需要整理截
 ### Git 拉取（推荐）
 
 ```bash
-git clone https://<your-token>@github.com/<org-or-user>/<repo>.git \
+git clone https://github.com/<org-or-user>/<repo>.git \
   ~/.agents/skills/loc-resume-screening
 
 cd ~/.agents/skills/loc-resume-screening
 git checkout main
 ```
 
-`<your-token>` 找 penny 获取（只读权限）。
+公开仓库可直接 clone；内部私有版本请使用团队提供的仓库地址和权限。
 
 也可以下载 `.skill` 文件后解压到 `~/.agents/skills/loc-resume-screening/`。
 
@@ -113,6 +113,7 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 - ✨ 新增 `verify_pricing_rule_coverage.py`：直接读取 Lark「评分规则配置」表，检查主流市场语言对是否齐全，输出 missing / extra / available。
 - ✨ 新增 `eval_runner.py`：统一运行 issue 回归、评分规则测试、Lark 语种覆盖、集成验收、隐私扫描和变更影响报告，输出 JSON + Markdown + trace/span 证据。
 - ✨ 新增 `replay_run.py`：可按 Lark `workflow_log` 的 `run_id` 或本地 `eval_report.json` 回放 Agent 执行时间线，输出 `replay.json` 和 `summary.md`。
+- ✨ 新增最终演示 fixture 矩阵：6 个脱敏虚拟候选人覆盖 S/A/B/C、复杂语言对、测试邮件、合同模板选择、Badcase checkpoint，并接入 `eval_runner.py`。
 - 🐛 修复 schema 校验的手动映射优先级：已确认的 `candidate.score -> Agent总分` 不再被同名公式字段「总分」误判为类型错误。
 - 🛡️ 更新回归报告分类：价格规则覆盖检查归为准入/QA，避免与业务主流程改动混淆。
 - ✅ 验证：Agent 治理 eval PASS；Lark 实表覆盖 22/22，missing 0，extra 0；issue/eval 回归测试 39/39；评分引擎测试 25/25；schema 全量准入 PASS；集成验收 PASS；隐私扫描 PASS。
@@ -152,14 +153,14 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
   - 不再直接发送，生成 `.eml` 文件保存到本地
   - VM 双击用 Outlook/Mail 打开，确认无误后自己点发送
   - 草稿保存路径：`config.yaml` 中 `contract_output` 目录下的 `drafts/` 子目录
-- 🐛 修复邮件落款残留「青木遥 / LOC Demo Vendor / LOC Demo Vendor」
-  - 统一改为「Localization Team / Localization Team」
+- 🐛 修复邮件落款残留个人姓名 / 旧供应商主体信息
+  - 统一改为团队级别落款
 
 ### v2.1（2026-05-28）
 **配置全面迁入 config.yaml + 模板自动推荐**
 
-- 🐛 修复发件人显示名（去除「青木遥」，改为裸邮箱，解决 spam 误判）
-- 🐛 邮件标题统一改为「Localization Team」
+- 🐛 修复发件人显示名（去除个人姓名，改为裸邮箱，解决 spam 误判）
+- 🐛 邮件标题统一改为团队级别标题
 - ♻️ 合同模板表 base_token / table_id 从硬编码改为读 config.yaml
 - ✨ 合同模板按账户类型自动打分推荐，直接回车使用推荐模板
 - ✨ 变量填充三层状态报告（已填充 / 值为空待确认 / 映射表无此变量）
@@ -209,6 +210,7 @@ loc-resume-screening/
 │   ├── pricing_rules.py        # 读取 Lark 评分规则配置表
 │   ├── eval_runner.py          # Agent 治理 eval 统一入口
 │   ├── replay_run.py           # Agent run_id / eval_report 回放
+│   ├── run_fixture_demo.py     # 脱敏最终演示测试集 runner
 │   ├── verify_pricing_rule_coverage.py # 检查 Lark 评分规则主流市场覆盖
 │   ├── workflow_runner.py      # 手动串联入口
 │   ├── workflow_engine.py      # 过程日志/人工确认基础能力
@@ -218,11 +220,15 @@ loc-resume-screening/
 │   ├── push_badcase_issues.py       # 项目侧统一格式 GitHub issue 创建
 │   ├── check_config.py         # 配置验证
 │   └── field_mapping.py        # 变量↔飞书字段 ID 映射
+├── demo_fixtures/
+│   ├── candidates.json         # 脱敏虚拟候选人矩阵
+│   └── resumes/                # 脱敏简历文本 fixture
 └── references/
     ├── onboarding.md           # 安装引导（从这里开始）
     ├── lark-dependencies.yaml  # 飞书资源依赖声明
     ├── config.md               # 配置字段说明
-    └── demo-data.md            # 测试数据
+    ├── demo-data.md            # 安装烟测数据
+    └── demo-fixture-matrix.md  # 最终演示 fixture 矩阵
 ```
 
 ---

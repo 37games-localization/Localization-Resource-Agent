@@ -1,0 +1,240 @@
+{
+  "version": "2026-06-12",
+  "description": "Sanitized demo fixtures for final resource-management Agent demos. These records are fictional and must not be used as production data.",
+  "candidates": [
+    {
+      "record_id": "DEMO-JA-0001",
+      "name": "青木遥",
+      "nickname": "Aoki",
+      "language_pair": "zh-CN>ja",
+      "services": ["翻译", "AIPE", "LQA"],
+      "status": "📋 简历待筛选",
+      "email": "demo-ja@example.com",
+      "aipe_price": 0.03,
+      "translation_price": 0.07,
+      "negotiation": "有一些商议空间",
+      "location": "日本东京",
+      "resume": {
+        "fixture_path": "resumes/DEMO-JA-0001_resume.txt",
+        "parsed_word_count": 1200000,
+        "parsed_years": 8,
+        "parsed_project_count": 6,
+        "parsed_entities": "Final Fantasy XIV, Monster Hunter Rise, Capcom, Square Enix, Keywords Studios",
+        "confidence": "high",
+        "confidence_reason": "字数、年限和项目清单均在简历中明确出现"
+      },
+      "contract": {
+        "info_record_id": "DEMO-CONTRACT-JA-0001",
+        "payee_type": "individual",
+        "region": "overseas",
+        "currency": "JPY",
+        "template_expected": "overseas_individual_foreign_currency",
+        "required_manual_fields": ["甲方合同编号"]
+      },
+      "expected": {
+        "score_min": 95,
+        "tier": "S",
+        "recommendation": "优先录用",
+        "next_status": "📝 测试题待发"
+      },
+      "demo_notes": "主线候选人，用于展示完整简历解析、评分、测试邀约、合同准备和人工确认。"
+    },
+    {
+      "record_id": "DEMO-KO-0002",
+      "name": "朴敏雅",
+      "nickname": "Mina",
+      "language_pair": "简中>韩语 Simplified Chinese to Korean",
+      "services": ["翻译", "LQA"],
+      "status": "📋 简历待筛选",
+      "email": "demo-ko@example.com",
+      "aipe_price": 0.04,
+      "translation_price": 0.08,
+      "negotiation": "无",
+      "location": "韩国首尔",
+      "resume": {
+        "fixture_path": "resumes/DEMO-KO-0002_resume.txt",
+        "parsed_word_count": 760000,
+        "parsed_years": 5,
+        "parsed_project_count": 4,
+        "parsed_entities": "Lineage, PUBG, Netmarble, LQA",
+        "confidence": "high",
+        "confidence_reason": "语言对是中英混写，用于验证归一化；字数来源明确"
+      },
+      "contract": {
+        "info_record_id": "DEMO-CONTRACT-KO-0002",
+        "payee_type": "individual",
+        "region": "overseas",
+        "currency": "CNY",
+        "template_expected": "overseas_individual_cny",
+        "required_manual_fields": ["甲方合同编号"]
+      },
+      "expected": {
+        "score_min": 70,
+        "tier": "A",
+        "recommendation": "优先联系",
+        "next_status": "📝 测试题待发"
+      },
+      "demo_notes": "用于展示复杂语言对归一化，以及海外个人收人民币合同选择。"
+    },
+    {
+      "record_id": "DEMO-EN-0003",
+      "name": "Alex Chen",
+      "nickname": "Alex",
+      "language_pair": "zh-CN>en",
+      "services": ["翻译", "校对"],
+      "status": "📝 测试题待发",
+      "email": "demo-en@example.com",
+      "aipe_price": 0.035,
+      "translation_price": 0.05,
+      "negotiation": "有一些商议空间",
+      "location": "加拿大温哥华",
+      "resume": {
+        "fixture_path": "resumes/DEMO-EN-0003_resume.txt",
+        "parsed_word_count": 420000,
+        "parsed_years": 3,
+        "parsed_project_count": 3,
+        "parsed_entities": "Steam indie RPG, mobile SLG, narrative QA",
+        "confidence": "medium",
+        "confidence_reason": "字数来自多个项目加总，部分项目未标明最终上线字数"
+      },
+      "contract": {
+        "info_record_id": "DEMO-CONTRACT-EN-0003",
+        "payee_type": "individual",
+        "region": "domestic",
+        "currency": "CNY",
+        "template_expected": "domestic_individual_cny",
+        "required_manual_fields": ["甲方合同编号"]
+      },
+      "expected": {
+        "score_min": 70,
+        "tier": "B",
+        "recommendation": "可进入测试",
+        "next_status": "📤 测试中"
+      },
+      "demo_notes": "用于展示测试邀约节点和中等置信度说明。"
+    },
+    {
+      "record_id": "DEMO-ES-0004",
+      "name": "Lucía García",
+      "nickname": "Lucia",
+      "language_pair": "zh-CN>es-LA",
+      "services": ["翻译"],
+      "status": "📋 简历待筛选",
+      "email": "demo-es@example.com",
+      "aipe_price": 0.08,
+      "translation_price": 0.11,
+      "negotiation": "无",
+      "location": "墨西哥城",
+      "resume": {
+        "fixture_path": "resumes/DEMO-ES-0004_resume.txt",
+        "parsed_word_count": 180000,
+        "parsed_years": 2,
+        "parsed_project_count": 1,
+        "parsed_entities": "casual mobile game",
+        "confidence": "low",
+        "confidence_reason": "字数基于混合估算，缺少清晰项目交付量"
+      },
+      "contract": {
+        "info_record_id": "DEMO-CONTRACT-ES-0004",
+        "payee_type": "individual",
+        "region": "overseas",
+        "currency": "USD",
+        "template_expected": "overseas_individual_foreign_currency",
+        "required_manual_fields": ["甲方合同编号"]
+      },
+      "expected": {
+        "score_max": 65,
+        "tier": "C",
+        "recommendation": "建议人工复核或婉拒",
+        "next_status": "❌ 已拒绝"
+      },
+      "demo_notes": "用于展示低分/低置信度、人工复核和婉拒分支。"
+    },
+    {
+      "record_id": "DEMO-DE-0005",
+      "name": "Meyer Studio GmbH",
+      "nickname": "Meyer",
+      "language_pair": "zh-CN>de",
+      "services": ["翻译", "AIPE", "LQA"],
+      "status": "✅ 测试通过",
+      "email": "demo-de@example.com",
+      "aipe_price": 0.03,
+      "translation_price": 0.09,
+      "negotiation": "有较大商议空间",
+      "location": "德国柏林",
+      "resume": {
+        "fixture_path": "resumes/DEMO-DE-0005_resume.txt",
+        "parsed_word_count": 980000,
+        "parsed_years": 6,
+        "parsed_project_count": 5,
+        "parsed_entities": "Gamescom project, RPG, MMORPG, LQA",
+        "confidence": "high",
+        "confidence_reason": "项目、语种、LQA经验和字数证据完整"
+      },
+      "contract": {
+        "info_record_id": "DEMO-CONTRACT-DE-0005",
+        "payee_type": "company",
+        "region": "overseas",
+        "currency": "EUR",
+        "template_expected": "overseas_company_foreign_currency",
+        "required_manual_fields": ["甲方合同编号", "公司税务资料人工复核"]
+      },
+      "expected": {
+        "score_min": 90,
+        "tier": "S",
+        "recommendation": "优先签约",
+        "next_status": "📄 合同待生成"
+      },
+      "demo_notes": "用于展示公司主体、海外外币合同模板选择。"
+    },
+    {
+      "record_id": "DEMO-BAD-0006",
+      "name": "Badcase Demo",
+      "nickname": "Badcase",
+      "language_pair": "zh-CN>pt-BR",
+      "services": ["AIPE"],
+      "status": "⚠️ Badcase待处理",
+      "email": "demo-badcase@example.com",
+      "aipe_price": 0.06,
+      "translation_price": null,
+      "negotiation": "有一些商议空间",
+      "location": "巴西圣保罗",
+      "resume": {
+        "fixture_path": "resumes/DEMO-BAD-0006_resume.txt",
+        "parsed_word_count": 0,
+        "parsed_years": 4,
+        "parsed_project_count": 2,
+        "parsed_entities": "mobile game QA, community localization",
+        "confidence": "low",
+        "confidence_reason": "简历没有明确翻译字数，系统不得用年限自动撑高评分"
+      },
+      "badcase": {
+        "flag": "⚠️ 是",
+        "expected_result": "应进入人工复核，不应直接按年限估算为高分",
+        "snapshot_expected": true
+      },
+      "contract": {
+        "info_record_id": "",
+        "payee_type": "unknown",
+        "region": "unknown",
+        "currency": "unknown",
+        "template_expected": "blocked_missing_contract_info",
+        "required_manual_fields": ["合同信息缺失"]
+      },
+      "expected": {
+        "score_max": 70,
+        "tier": "C",
+        "recommendation": "人工复核",
+        "next_status": "⚠️ Badcase待处理"
+      },
+      "demo_notes": "用于展示 badcase 脱敏快照、issue 上报格式和评分防误判。"
+    }
+  ],
+  "interleaved_demo_script": [
+    {"speaker": "VM", "text": "调用资源管理 Agent，看下青木遥的简历", "candidate_record_id": "DEMO-JA-0001", "step": "score"},
+    {"speaker": "VM", "text": "先暂停，我要处理一个 README 小改动", "step": "context_switch"},
+    {"speaker": "VM", "text": "继续资源管理 Agent，给青木遥发送测试题，附件用 demo_fixtures/test_files/game_translation_test.xlsx", "candidate_record_id": "DEMO-JA-0001", "step": "test_email"},
+    {"speaker": "VM", "text": "调用资源管理 Agent，给 Meyer Studio GmbH 准备合同", "candidate_record_id": "DEMO-DE-0005", "step": "contract"},
+    {"speaker": "VM", "text": "把 Badcase Demo 标成 badcase，期望进入人工复核", "candidate_record_id": "DEMO-BAD-0006", "step": "badcase"}
+  ]
+}

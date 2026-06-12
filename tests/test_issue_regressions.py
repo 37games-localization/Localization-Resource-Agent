@@ -502,7 +502,7 @@ class AgentRouterProtocolTest(unittest.TestCase):
     def test_attachment_continues_active_session(self):
         session = ActiveAgentSession(
             candidate="青木遥",
-            record_id="20260520-08",
+            record_id="DEMO-JA-0001",
             current_step="test-email",
             waiting_for="attachment",
         )
@@ -510,14 +510,14 @@ class AgentRouterProtocolTest(unittest.TestCase):
         result = classify_instruction("附件用 ~/Downloads/test.xlsx", session=session)
 
         self.assertEqual(result["step"], "test-email")
-        self.assertEqual(result["record_id"], "20260520-08")
+        self.assertEqual(result["record_id"], "DEMO-JA-0001")
         self.assertTrue(result["attachment"].endswith("/Downloads/test.xlsx"))
         self.assertTrue(result["can_execute"])
 
     def test_checkpoint_confirmation_continues_active_session(self):
         session = ActiveAgentSession(
             candidate="青木遥",
-            record_id="20260520-08",
+            record_id="DEMO-JA-0001",
             current_step="test-email",
             waiting_for="checkpoint",
             last_checkpoint_token="ckpt-test",
@@ -532,7 +532,7 @@ class AgentRouterProtocolTest(unittest.TestCase):
     def test_non_resource_task_invalidates_active_session(self):
         session = ActiveAgentSession(
             candidate="青木遥",
-            record_id="20260520-08",
+            record_id="DEMO-JA-0001",
             current_step="test-email",
             waiting_for="checkpoint",
             last_checkpoint_token="ckpt-test",
