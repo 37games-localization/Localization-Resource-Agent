@@ -31,8 +31,8 @@ resources:
   - id: pricing_rules
     desc: 评分规则配置表（各语言对 AIPE/人工翻译预期价与上限价）
     url: "<由项目维护人提供>"
-    base_token: "<填写到 config.local.yaml:lark.base_token>"
-    table_id: "<填写到 config.local.yaml:lark.rules_table_id>"
+    base_token: "<填写到 config.local.yaml:pricing_rules.base_token；可独立于候选人主表 Base>"
+    table_id: "<填写到 config.local.yaml:pricing_rules.table_id；旧配置 lark.rules_table_id 仍兼容>"
     used_by:
       - scripts/pricing_rules.py
       - scripts/resume_screening_engine_v2.py

@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from schema_inspector import list_fields, resolve_table_from_config
-from config_loader import load_config, get_lark
+from config_loader import load_config, get_table_ref
 
 SKILL_ROOT = Path(__file__).parent.parent
 REQUIRED_SCHEMA_PATH = SKILL_ROOT / "references" / "lark-required-schema.yaml"
@@ -135,21 +135,8 @@ def list_tables(base_token: str) -> list[dict]:
 
 def base_token_for_missing_table(table_key: str) -> str:
     cfg = load_config()
-    schema = load_yaml(REQUIRED_SCHEMA_PATH)
-    table = schema.get("tables", {}).get(table_key, {})
-    keys = table.get("config_keys", {})
-    dotted = keys.get("base_token", "")
-    cur = cfg
-    for part in dotted.split("."):
-        if not isinstance(cur, dict):
-            cur = ""
-            break
-        cur = cur.get(part, "")
-    if cur:
-        return cur
-    if table_key in ("workflow_log", "contract_info"):
-        return get_lark(cfg).get("base_token", "")
-    return ""
+    base_token, _table_id = get_table_ref(cfg, table_key)
+    return base_token
 
 
 def build_table_fields(required_fields: list[dict]) -> list[dict]:

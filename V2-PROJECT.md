@@ -2,7 +2,7 @@
 
 > 文档维护：槐序
 > 创建：2026-06-10
-> 最后更新：2026-06-10 14:05
+> 最后更新：2026-06-12
 > 分支：`v2-workflow-viz`（稳定版保底：`main`）
 
 ---
@@ -101,6 +101,183 @@ python3 scripts/workflow_runner.py resume --token *** --decision "写入"
 | 📝 测试题待发 | `send_test_email_v2.py`（需 `--file`）|
 | 📄 合同待生成 | `generate_contract_v2.py` |
 | 其他状态 | 打印当前状态 + 说明需人工操作 |
+
+---
+
+## 二点五、稳定唤起与短期会话路由层（v0.2 规划）
+
+### 背景
+
+当前 v0.1 已经证明：资源管理 Agent 的单节点能力可独立调用，Lark 可以作为状态、输入、输出和流程日志的事实来源。但如果后续交给 VM 在 Claude Code / OpenClaw 等工具里长期使用，会出现新的稳定性问题：
+
+- VM 不一定只在一个对话里持续处理资源管理流程；
+- 同一个 Claude Code / OpenClaw 窗口可能同时处理 README、报错排查、文档修改、资源管理等任务；
+- 如果依赖当前聊天上下文“记得自己正在跑资源管理 Agent”，跨任务、跨对话、多候选人并行时仍会漂移。
+
+因此，资源管理 Agent 的稳定调用不应依赖 LLM 上下文记忆，而应建立固定入口协议：
+
+```text
+固定唤起词 + Step Router + Lark 状态机 + 单点脚本
+```
+
+### 目标
+
+为现有 Agent 增加一层轻量稳定入口，使 VM 可以用自然语言稳定切入任意单点节点，同时不破坏当前已验收的业务脚本和 Lark 状态机。
+
+典型调用：
+
+```text
+调用资源管理 Agent，给青木遥发测试邀请
+调用资源管理 Agent，继续青木遥的合同步骤
+继续资源管理 Agent，处理 20260520-08
+```
+
+系统应执行：
+
+```text
+自然语言指令
+→ 识别资源管理 Agent 唤起词
+→ Step Router 判断节点
+→ 从 Lark 定位候选人和当前状态
+→ 检查前置条件
+→ 调用对应单点脚本
+→ 写回 Lark / workflow_log
+→ 输出 checkpoint 给 VM 确认
+```
+
+### 设计原则
+
+1. **首次进入必须有唤起词**
+   - 例如“调用资源管理 Agent”“继续资源管理 Agent”。
+   - 避免普通任务被误判为资源管理流程。
+
+2. **当前短期 session 内可以省略唤起词**
+   - 如果 Agent 刚刚提示“缺少测试题附件”，VM 后续说“附件用 ~/Downloads/test.xlsx”应视为继续当前资源管理任务。
+   - 如果 Agent 刚刚输出 checkpoint，VM 说“确认发送”应视为对当前 checkpoint 的人工确认。
+
+3. **插入非资源管理任务后 session 失效**
+   - 例如 VM 中途说“帮我改 README”“查一下这个报错”，资源管理短期上下文应暂停或失效。
+   - 之后回到资源管理流程时，必须重新显式唤起。
+
+4. **短期 session 只负责承接，不作为业务事实来源**
+   - `active_agent_session` 只能保存当前对话内的候选人、step、等待信息和过期时间。
+   - 候选人状态、合同信息、评分结果、workflow_log、checkpoint、Badcase 等事实仍以 Lark 为准。
+
+5. **信息不足必须停下，不允许猜测执行**
+   - 缺附件、候选人重名、目标状态不明、合同信息不完整、当前状态不满足前置条件时，必须输出前置条件缺失说明。
+
+6. **每个 step 必须可独立唤起**
+   - 评分、测试题、合同生成、签字核查、状态推进、Badcase 导出都应能单独触发。
+   - 不要求 VM 必须从流程第 1 步跑到第 8 步。
+
+### active_agent_session 草案
+
+`active_agent_session` 是当前对话内的轻量缓存，用于承接“附件用这个”“确认发送”“继续”等短指令。
+
+示例：
+
+```json
+{
+  "agent": "loc-resource-management",
+  "candidate": "青木遥",
+  "record_id": "20260520-08",
+  "current_step": "test-email",
+  "waiting_for": "attachment",
+  "expires_at": "30 minutes",
+  "last_user_intent": "send_test_email",
+  "last_checkpoint_token": "ckpt-xxx"
+}
+```
+
+允许保存：
+
+- 当前 Agent 名称；
+- 当前候选人定位信息；
+- 当前 step；
+- 正在等待 VM 补充的信息；
+- 最近 checkpoint token；
+- session 过期时间。
+
+不允许保存为事实来源：
+
+- 候选人真实状态；
+- 邮箱、银行账号、合同信息等敏感事实；
+- 评分结果和评级；
+- workflow_log 正式记录；
+- Badcase 快照和处理状态。
+
+### Router 职责边界
+
+Step Router 只负责“识别要调用哪个已存在能力”，不重写业务逻辑。
+
+Router 可以做：
+
+- 识别唤起词；
+- 识别候选人定位方式：record_id / 姓名 / 昵称 / 邮箱；
+- 判断用户意图：评分、发测试题、生成合同、核查签字合同、推进状态、导出 Badcase；
+- 从 Lark 读取当前状态和依赖字段；
+- 做前置条件检查；
+- 调用对应单点脚本；
+- 把执行过程写入 workflow_log；
+- 输出 checkpoint。
+
+Router 不可以做：
+
+- 自己生成评分结果；
+- 自己决定合同模板选择规则；
+- 跳过原脚本的校验；
+- 用聊天上下文替代 Lark 状态；
+- 在缺少关键输入时猜测执行。
+
+### 与现有能力的关系
+
+这项能力应排在 v0.2，不进入 v0.1 冻结交付范围。
+
+它与现有模块关系如下：
+
+- **单点脚本**：继续作为业务执行层；
+- **Lark 主表 / 合同表 / 流程日志表**：继续作为事实来源；
+- **workflow_engine / checkpoint**：继续负责过程记录和人工确认；
+- **workflow_runner next**：仍不作为默认生产入口，后续可被 Router 调用或替换为显式 step 调度；
+- **前端 wrapper / Storybook**：用于展示 Router 识别结果、前置条件、执行过程和 checkpoint。
+
+### 验收标准
+
+v0.2 稳定唤起层至少需要通过以下场景：
+
+1. 首次唤起：
+   - 输入“调用资源管理 Agent，给青木遥发测试邀请”；
+   - 能定位候选人、识别 step、检查附件和邮箱前置条件。
+
+2. 缺信息续接：
+   - Agent 提示缺附件后，VM 只说“附件用 ~/Downloads/test.xlsx”；
+   - 系统能继续当前 `test-email` step，不要求 VM 重新说明完整任务。
+
+3. checkpoint 续接：
+   - Agent 输出“测试邀请待确认”；
+   - VM 说“确认发送”；
+   - 系统能识别为当前 checkpoint 决策，而不是新任务。
+
+4. 插入其他任务后失效：
+   - VM 中途说“帮我改 README”；
+   - 再说“确认发送”时，系统不应继续资源管理流程，必须要求重新唤起或说明上下文已失效。
+
+5. 单点独立调用：
+   - “调用资源管理 Agent，生成青木遥合同”；
+   - 即使没有从评分、测试步骤串联过来也能独立执行前置检查和合同生成。
+
+6. Lark 状态优先：
+   - 即使短期 session 里记录了候选人状态，执行前仍必须重新读取 Lark 当前状态和依赖字段。
+
+### 待办拆分
+
+- [x] 定义稳定唤起词和保留短语：调用资源管理 Agent / 继续资源管理 Agent / 资源管理 Agent 处理 XXX。
+- [x] 定义 Step Router 意图分类：评分、测试题、合同生成、签字核查、状态推进、Badcase。
+- [x] 定义 `active_agent_session` 数据结构与失效规则。
+- [x] 定义“插入非资源管理任务”的判定规则。
+- [ ] 为每个 step 补前置条件清单：候选人、附件、邮箱、合同信息、目标状态等。
+- [x] 设计 Router 回归测试集，覆盖首次唤起、缺信息续接、checkpoint 续接、上下文失效、单点独立调用。
+- [ ] 前端 wrapper 增加 Router 识别结果展示：识别到的候选人、step、前置条件、阻塞原因、checkpoint。
 
 ---
 
@@ -208,6 +385,10 @@ assert result["base_tier"] == snapshot["base_tier"]
 | Demo | `run_testmode_demo.py` 真实 TEST_MODE 证据采集器：保存 summary/transcript/stdout | ✅ | — | 2026-06-10 |
 | 收敛 | `integration_readiness.py` 分步骤集成验收，只读检查 v2 包装是否可进入生产验证 | ✅ | — | 2026-06-10 |
 | 收敛 | 新增 `references/integration-validation-plan.md`，明确先单步骤等价验收，再前端只读看板，最后启用统一入口 | ✅ | — | 2026-06-10 |
+| 治理 | `trace_span.py` 标准化旁路模型：将 workflow step 映射为 run/span 结构并支持脱敏 | ✅ | — | 2026-06-12 |
+| 治理 | `agent_router.py` 稳定唤起协议层：只做唤起词、step、候选人、附件、checkpoint 续接识别，不接管业务脚本 | ✅ | — | 2026-06-12 |
+| 治理 | issue 回归测试新增 Trace/Router 协议测试，锁定首次唤起、缺信息续接、checkpoint 续接、session 失效边界 | ✅ | — | 2026-06-12 |
+| 配置治理 | #19 修复：评分规则配置表支持独立 `pricing_rules.base_token/table_id`，不再默认绑定候选人主表 Base，保留旧配置兼容 | ✅ | — | 2026-06-12 |
 | Layer 2 | Agent 行为评测框架设计 | 📅 待规划 | — | — |
 
 ### 已记录问题（issues/）
@@ -298,3 +479,221 @@ git log --oneline
 - [ ] **v2 合并到 main**（所有测试通过后）
 - [ ] **其余脚本接入 WorkflowEngine**（check_signed_contract / send_rejection_email / update_status）
 - [ ] **业务脚本迁移到 field_resolver.py**：逐步替换硬编码 field_id，改为读取 `config/lark-field-mapping.yaml`
+- [ ] **稳定唤起与短期会话路由层**：固定唤起词 + Step Router + active_agent_session + Lark 状态机，支持 VM 跨任务后稳定重新切入资源管理节点
+- [ ] **Trace / Span 标准化**：将 workflow_log 升级为可按 run_id 回放的标准 trace-span 观测模型，支持审计、排查和 Badcase 归因
+- [ ] **Eval 自动化与开发后 Regression Report**：建立固定测试集，每次改动后自动区分主流程影响、旁路观测影响、前端展示影响和需生产验证项
+
+
+---
+
+## 八、后续待办补充：行业标准能力（Trace / Eval / Regression）
+
+当前系统已经具备业务过程可观测和人工 Badcase 回流能力：
+
+- step start / input / output / success / failed / checkpoint；
+- workflow_log / agent_trace 思路；
+- Lark 状态写回；
+- 前端执行流展示；
+- Badcase 标记、脱敏快照和 GitHub issue 回流。
+
+但从生产级 Agent 的行业标准看，当前仍更接近“业务过程日志”，尚未完整具备标准化 `trace-span` 和自动化 `eval`。这部分应作为 v0.2+ 的生产治理能力规划，不进入 v0.1 冻结范围。
+
+### 8.1 Trace / Span 标准化
+
+#### 目标
+
+让每一次 Agent 运行都可以按 `run_id` 回放完整链路，支持排查、审计、性能分析和 Badcase 归因。
+
+期望回放链路：
+
+```text
+VM 指令
+→ 候选人定位
+→ Lark 读取
+→ 脚本调用
+→ LLM 解析
+→ 规则计算
+→ Lark 写回
+→ checkpoint
+```
+
+#### 当前已有基础
+
+- `workflow_engine` 已能记录 step 开始、输入、输出、成功、失败、checkpoint。
+- `workflow_log` 已用于过程观察、恢复和审计。
+- 前端 wrapper 已能展示执行流。
+- Badcase 快照已经能把问题上下文脱敏回流。
+
+#### 待补标准字段
+
+后续可将现有业务日志升级为更标准的 span 结构：
+
+```json
+{
+  "run_id": "run_xxx",
+  "span_id": "span_xxx",
+  "parent_span_id": "span_parent_xxx",
+  "agent": "loc-resource-management",
+  "step": "test-email",
+  "span_type": "llm_call | tool_call | lark_read | lark_write | checkpoint | error",
+  "input": {},
+  "output": {},
+  "status": "success | failed | waiting_confirmation",
+  "duration_ms": 1234,
+  "model": "deepseek / openclaw / claude",
+  "token_usage": {},
+  "error": {},
+  "created_at": "..."
+}
+```
+
+#### 设计原则
+
+- Trace / Span 是观测层，不改变业务脚本结果。
+- Lark 主表仍是业务事实来源；Trace 只记录执行过程和证据。
+- `input` / `output` 必须支持脱敏视图，不能把合同敏感信息、邮箱、银行账号、证件号直接写入外部 issue 或公开报告。
+- `span_id` / `parent_span_id` 应能表达一次运行中的父子关系，例如：用户指令 span → Lark read span → tool call span → checkpoint span。
+- 前端 wrapper 后续应支持按 `run_id` 展示完整 trace 树，而不只是线性日志。
+
+#### 验收标准
+
+- 任意一次执行可按 `run_id` 查询完整 span 列表。
+- 每个 span 至少包含：`run_id`、`span_id`、`agent`、`step`、`span_type`、`status`、`created_at`。
+- 关键调用 span 能记录耗时：Lark 读取、脚本调用、LLM 调用、Lark 写回。
+- 失败 span 能记录结构化错误和下一步建议。
+- checkpoint span 能关联人工确认结果。
+- Badcase snapshot 能引用相关 run/span，但对外导出时仍保持脱敏。
+
+### 8.2 Eval 自动化
+
+#### 目标
+
+让每次代码、字段映射、前端 wrapper、规则配置或提示词改动后，可以自动判断主流程是否被破坏，而不是只靠人工感觉。
+
+当前已有基础：
+
+- 单点能力验证；
+- 生产测试案例；
+- regression report 思路；
+- Badcase 标记；
+- 脱敏快照；
+- GitHub issue 回流；
+- 人工判断结果是否符合预期。
+
+但还没有形成完整自动化 eval。
+
+#### 固定测试集方向
+
+后续可沉淀以下固定测试集：
+
+```text
+简历解析测试集
+合同模板选择测试集
+测试邮件生成测试集
+签字合同核查测试集
+状态推进测试集
+Badcase 脱敏上报测试集
+Router 稳定唤起测试集
+Lark mapping / 表结构迁移测试集
+```
+
+每次改动后自动跑：
+
+```text
+输入测试案例
+→ 执行 Agent step
+→ 对比期望输出
+→ 标记 pass / fail / changed
+→ 输出 regression report
+```
+
+#### 核心指标
+
+- 简历字段抽取准确率；
+- 评分结果一致性；
+- 语言对 / 报价规则匹配准确率；
+- 合同模板选择准确率；
+- 邮件草稿字段完整率；
+- 状态写回正确率；
+- Badcase 脱敏字段合规率；
+- Router 意图识别准确率；
+- Lark mapping 兼容率；
+- 主流程是否被前端或 mapping 改动影响。
+
+#### 设计原则
+
+- Eval 要优先覆盖已验收单点能力，避免 wrapper、Router 或 mapping 改动破坏主流程。
+- LLM 解析类 eval 应允许“语义等价”，但结构化字段、评分结果、模板选择、状态写回必须可断言。
+- Eval 输出不能只给 pass/fail，还要说明 diff：字段变化、状态变化、脚本变化、前端展示变化。
+- Badcase 一旦被确认，应能转入测试集，形成回归保护。
+
+### 8.3 开发后 QA / Regression Report
+
+#### 目标
+
+把 eval 与已有 regression report 思路结合，形成每次开发后的检查报告，明确本次改动是否影响主流程。
+
+报告结构建议：
+
+```text
+本次改动影响范围：
+- 主流程逻辑：是否影响
+- 单点脚本：是否影响
+- Lark mapping：是否影响
+- 前端展示：是否影响
+- 文档 / onboarding：是否影响
+- 旁路观测：是否影响
+```
+
+输出结果必须明确区分：
+
+```text
+哪些改动影响主流程
+哪些只是旁路观测
+哪些只是前端展示
+哪些需要重新生产验证
+哪些可以只跑自动化回归
+```
+
+#### 推荐报告字段
+
+- 改动摘要；
+- 影响范围分类；
+- 触及文件和模块；
+- 是否影响 v0.1 单点能力；
+- 是否影响 Lark 字段映射；
+- 是否影响 workflow_log / trace / badcase；
+- 已运行测试；
+- 未覆盖风险；
+- 是否需要 VM 生产验证；
+- 回滚建议。
+
+### 8.4 与现有规划的关系
+
+- **与 workflow_log 的关系**：workflow_log 是当前业务日志；trace-span 是后续标准化观测模型。
+- **与 Badcase 回流的关系**：Badcase 是人工发现问题；eval 是把已发现问题沉淀为自动回归保护。
+- **与 Layer 2 Agent 行为评测的关系**：Layer 2 关注自然语言任务完成质量；eval 自动化关注每次改动是否破坏已验收能力。
+- **与前端 wrapper 的关系**：前端可展示 trace 树、eval 结果和 regression report，但不应接管业务判断。
+- **与稳定唤起 Router 的关系**：Router 本身也应纳入 eval，验证唤起词、短期 session、上下文失效和单点切入是否稳定。
+
+### 8.5 待办拆分
+
+- [x] 定义 `trace_span` 标准字段和脱敏策略。
+- [x] 将现有 workflow_log 映射到 trace-span 视图，先不破坏现有 Lark 表结构。
+- [x] 为 Lark read / Lark write / tool call / LLM call / checkpoint / error 建立 span 类型枚举。
+- [ ] 前端 wrapper 支持按 `run_id` 展示 trace 树和 span 详情。
+- [ ] 建立固定 eval 测试集目录：简历解析、合同模板、测试邮件、签字核查、状态推进、Badcase、Router、Lark mapping。
+- [ ] 将已确认 Badcase 转为回归用例。
+- [x] 增加开发后 regression report 模板，区分主流程、单点脚本、Lark mapping、前端展示、文档、旁路观测。
+- [ ] 每次合并前运行 eval，并输出 pass / fail / changed / needs-production-validation。
+
+### 8.6 一句话总结
+
+资源管理 Agent 后续不仅要解决“同事如何稳定唤起并切入 step”，还要补齐两个生产级能力：
+
+```text
+Trace-span 标准化：让每次执行可回放、可审计、可定位问题
+Eval 自动化：让每次改动后能自动判断主流程有没有被破坏
+```
+
+这样它才会从“能用的业务 Agent”继续升级为“可交接、可治理、可持续迭代的生产级 Agent”。

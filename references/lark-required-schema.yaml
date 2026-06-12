@@ -221,8 +221,10 @@ tables:
     table_name: "评分规则配置"
     create_if_missing_table: false
     config_keys:
-      base_token: "lark.base_token"
-      table_id: "lark.rules_table_id"
+      base_token: "pricing_rules.base_token"
+      table_id: "pricing_rules.table_id"
+      fallback_base_token: "lark.base_token"
+      fallback_table_id: "lark.rules_table_id"
     required_fields:
       - key: pricing.language_pair
         name: "语言对"

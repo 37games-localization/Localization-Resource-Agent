@@ -31,7 +31,7 @@ except ImportError:
     fitz = None
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_loader import load_config, get_lark, get_llm_api_key
+from config_loader import load_config, get_lark, get_llm_api_key, get_table_ref
 from lark_cli_utils import normalize_record_list_data
 from pricing_rules import PricingRulesError, load_price_rules
 
@@ -40,7 +40,7 @@ _CFG        = load_config()
 _LARK       = get_lark(_CFG)
 BASE_TOKEN  = _LARK.get("base_token", "")
 TABLE_ID    = _LARK.get("resume_table_id", "")
-RULES_TABLE = _LARK.get("rules_table_id", "")
+RULES_BASE_TOKEN, RULES_TABLE = get_table_ref(_CFG, "pricing_rules")
 LOCAL_RULES_PATH = Path(__file__).parent.parent / "config" / "resume_screening_rules_v2.json"
 PDF_CACHE   = Path.home() / ".loc-resume-cache"
 PDF_CACHE.mkdir(exist_ok=True)
@@ -188,9 +188,9 @@ def lark_cli(*args) -> dict:
 def fetch_price_rules() -> dict:
     """读取价格标准，返回 {语言对标准化key: {aipe_target, aipe_max, trans_target, trans_max}}.
 
-    默认使用包内规则，保证 VM 安装后不需要从 0 配规则表。
-    如 config.local.yaml 配置了 lark.rules_table_id，则优先读取飞书规则表，
-    便于后续团队替换或集中维护各语种单价范围。
+    生产模式读取飞书规则表；TEST_MODE 或显式本地 fallback 才使用包内规则。
+    评分规则表可通过 pricing_rules.base_token/table_id 独立配置，不要求和
+    候选人主表处于同一个 Base。
     """
     rules, _meta = load_price_rules()
     return rules

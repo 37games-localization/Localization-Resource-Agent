@@ -63,6 +63,7 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `run_testmode_demo.py` | 真实 TEST_MODE demo 证据采集：调用现有脚本并保存 transcript/summary | 「跑一遍真实测试demo」「录制前验证」 |
 | `integration_readiness.py` | v2 分步骤集成验收：只读检查原脚本、v2包装、schema映射，不执行业务动作 | 「检查v2现在能不能进入生产验证」「做一轮集成验收」 |
 | `regression_report.py` | 变更后回归报告：区分主流程影响、旁路观测、准入/QA、文档改动 | 「改完后影响哪些主流程」「出一份回归报告」 |
+| `verify_pricing_rule_coverage.py` | 读取 Lark 评分规则表，检查 22 个主流市场语言对是否齐全 | 「检查评分规则语种覆盖」 |
 
 所有脚本优先从 skill 根目录下的 `config.local.yaml` 读取本机配置；未生成时才读取模板 `config.yaml`。
 
@@ -301,7 +302,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 
 ### 1️⃣ 价格规则（高频更新）
 
-**生产来源**：飞书「评分规则配置」表
+**生产来源**：飞书「评分规则配置」表。该表是独立规则资产，可通过 `pricing_rules.base_token/table_id` 单独配置；VM 更换简历收集表时，不需要默认重建评分规则表。
 
 这里存着**各语言对的目标价 + 上限价**，评分引擎用它判断资源商报价是否合理。**市场行情变了就需要来改**。
 包内 `config/resume_screening_rules_v2.json` 仅作为 TEST_MODE / 显式 `--allow-local-rules` 的测试 fallback；生产评分缺 Lark 规则表、缺字段、缺语言对时必须阻断。

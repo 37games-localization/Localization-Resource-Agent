@@ -23,6 +23,7 @@ MAIN_FLOW_SCRIPTS = {
     "scripts/lark_cli_utils.py": "Lark API 重试工具会影响所有 Lark 读写节点",
     "scripts/parse_resumes.py": "简历解析主流程",
     "scripts/evaluate_resumes.py": "LLM 简历解析+评分方向B主流程",
+    "scripts/pricing_rules.py": "生产评分价格规则读取会影响评分价格维度",
     "scripts/rescore_and_write.py": "评分写回主流程",
     "scripts/send_test_email.py": "测试题邮件主流程",
     "scripts/generate_contract.py": "合同生成主流程",
@@ -40,7 +41,9 @@ CONFIG_GOVERNANCE = {
 }
 
 OBSERVATION_LAYER = {
+    "scripts/agent_router.py": "稳定唤起和短期会话 Router 协议层，只做意图分类和前置条件判断",
     "scripts/manual_trace.py": "受控手动串联流程日志写入模块",
+    "scripts/trace_span.py": "trace/span 标准化旁路模型，不改变业务结果",
     "scripts/workflow_engine.py": "流程日志、checkpoint、可视化包装层",
     "scripts/workflow_runner.py": "统一入口和状态路由包装层",
     "scripts/run_dialog.py": "对话式恢复和待决策包装层",
@@ -56,6 +59,7 @@ SCHEMA_AND_QA = {
     "scripts/schema_inspector.py": "表结构读取工具",
     "scripts/integration_readiness.py": "只读集成验收",
     "scripts/regression_report.py": "只读变更回归报告",
+    "scripts/verify_pricing_rule_coverage.py": "评分规则主流市场覆盖检查",
     "references/lark-required-schema.yaml": "Lark 必需字段定义",
     "references/lark-field-dictionary.md": "字段语义字典",
     "config/lark-field-mapping.yaml": "当前 Lark 字段映射结果",

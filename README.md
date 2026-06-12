@@ -1,6 +1,6 @@
 # 本地化资源管理 Agent
 
-> Localization Resource Agent · 当前版本：v2.4
+> Localization Resource Agent · 当前版本：v2.5
 
 覆盖外部译者从**投简历到正式入库**的完整招募链路，通过自然语言指令驱动，飞书多维表格作为数据中枢。当前版本已进入生产端验证闭环：单点能力可独立调用，关键节点有日志/人工确认/安全准备模式，Badcase 可回流到 GitHub issue 追踪修复。
 
@@ -103,6 +103,17 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 
 ## 更新日志
 
+### v2.5（2026-06-12）
+**评分规则治理 + 全语种覆盖回归**
+
+- ✨ 评分规则配置表支持独立 Lark Base/Table：`pricing_rules.base_token/table_id` 可与候选人主表、合同信息表分开维护，并兼容旧配置。
+- ✨ 新增本机 `.env.local` / `LOC_PRICING_RULES_*` 配置读取：敏感表引用可留在本机，不进入仓库或 skill 包。
+- 🐛 修复中英混写语言对匹配：例如「简中>韩语 Simplified Chinese to Korean」可稳定归一化为 `zh-CN>ko`，并命中 Lark 评分规则。
+- ✨ 新增 22 个主流市场语言对回归：覆盖英文源 14 个方向、简中源 8 个方向，支持中文标签和“中文 + 英文解释”的双语标签。
+- ✨ 新增 `verify_pricing_rule_coverage.py`：直接读取 Lark「评分规则配置」表，检查主流市场语言对是否齐全，输出 missing / extra / available。
+- 🛡️ 更新回归报告分类：价格规则覆盖检查归为准入/QA，避免与业务主流程改动混淆。
+- ✅ 验证：Lark 实表覆盖 22/22，missing 0，extra 0；issue 回归测试 34/34；评分引擎测试 25/25；集成验收 PASS；隐私扫描 PASS。
+
 ### v2.4（2026-06-11）
 **生产端验证修复 + 工作流可视化稳定版**
 
@@ -193,6 +204,7 @@ loc-resume-screening/
 │   ├── evaluate_resumes.py     # LLM 一次性解析+评分（可选路径）
 │   ├── rescore_and_write.py    # 重算评分并写回飞书
 │   ├── pricing_rules.py        # 读取 Lark 评分规则配置表
+│   ├── verify_pricing_rule_coverage.py # 检查 Lark 评分规则主流市场覆盖
 │   ├── workflow_runner.py      # 手动串联入口
 │   ├── workflow_engine.py      # 过程日志/人工确认基础能力
 │   ├── schema_validator.py     # 飞书表头检查与字段映射
