@@ -19,6 +19,20 @@ description: "本地化资源管理全流程 skill，覆盖译者简历筛选到
 
 VM 首次使用时，先读引导文档：[`references/onboarding.md`](references/onboarding.md)
 
+### 文档阅读路由
+
+不要在普通 VM 安装或日常操作时主动通读全仓库。按场景读取最小必要文档：
+
+| 场景 | 读取文档 |
+|---|---|
+| VM 首次安装 / 初始化配置 | `SKILL.md`、`references/onboarding.md`、`config.example.yaml` |
+| 日常操作：看简历、发测试题、准备合同、核查签字、状态推进、Badcase | `SKILL.md`；需要字段含义时再读 `references/lark-field-dictionary.md` |
+| 配置排错 / Lark 表迁移 / 字段改名 | `references/config.md`、`references/config-secrets-policy.md`、`references/lark-field-dictionary.md` |
+| 飞书表、合同模板、字段依赖变更 | `references/lark-dependencies.yaml`、`scripts/field_mapping.py` |
+| 开发接手 / 架构排查 / 发版治理 / 回归审计 | `HANDOVER.md`、`V2-PROJECT.md`、eval / trace / regression 相关文档 |
+
+`HANDOVER.md` 和 `V2-PROJECT.md` 是工程维护文档。除非用户明确说「接手开发」「排查架构」「做工程治理」「准备发版」或类似诉求，否则不要在 VM 安装和日常使用时主动读取或总结它们。
+
 配置验证指令（VM 说「帮我验证资源管理配置」时执行）：
 ```bash
 cd ~/.agents/skills/loc-resume-screening
@@ -623,10 +637,13 @@ AI 回复：✅ 已写入飞书，李全鸿档位 S，优先录用。
 
 ## 参考文档
 
-- 安装引导：[`references/onboarding.md`](references/onboarding.md)
-- 字段ID / Base配置：[`references/config.md`](references/config.md)
-- 飞书资源依赖：[`references/lark-dependencies.yaml`](references/lark-dependencies.yaml)
-- 合同变量映射：[`scripts/field_mapping.py`](scripts/field_mapping.py)
+- 安装引导：[`references/onboarding.md`](references/onboarding.md)（VM 首次配置）
+- 字段ID / Base配置：[`references/config.md`](references/config.md)（配置排错 / 换表）
+- 字段用途字典：[`references/lark-field-dictionary.md`](references/lark-field-dictionary.md)（表头变更 / 字段含义）
+- 飞书资源依赖：[`references/lark-dependencies.yaml`](references/lark-dependencies.yaml)（飞书表或合同字段变更）
+- 合同变量映射：[`scripts/field_mapping.py`](scripts/field_mapping.py)（合同变量维护）
+- 工程交接：[`HANDOVER.md`](HANDOVER.md)（仅开发接手 / 架构排查 / 发版治理）
+- 项目规划：[`V2-PROJECT.md`](V2-PROJECT.md)（仅开发接手 / 架构排查 / 发版治理）
 
 ---
 

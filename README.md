@@ -81,9 +81,19 @@ Agent 会逐步引导 VM 完成：
 
 详细引导见 [`references/onboarding.md`](references/onboarding.md)
 
-v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-11.md`](references/v2.4-release-notes-2026-06-11.md)
+## 文档怎么读
 
-生产表维护清单见 [`HANDOVER.md`](HANDOVER.md#vm-日常维护的-lark-表格)
+VM 日常使用不需要读完整仓库。安装和操作默认只看短入口：
+
+| 场景 | 读取入口 |
+|---|---|
+| 安装和首次配置 | `README.md`、`SKILL.md`、`references/onboarding.md` |
+| 日常自然语言使用 | `SKILL.md` |
+| 配置排错 / 换 Lark 表 | `references/config.md`、`references/lark-field-dictionary.md`、`references/config-secrets-policy.md` |
+| 飞书表或合同字段变更 | `references/lark-dependencies.yaml`、`references/lark-field-dictionary.md` |
+| 工程接手 / 架构排查 / 发版治理 | `HANDOVER.md`、`V2-PROJECT.md`、eval / trace / regression 相关文档 |
+
+`HANDOVER.md` 和 `V2-PROJECT.md` 是维护者文档，不是 VM 安装后的默认阅读材料。只有在用户明确说“接手开发”“排查架构”“做工程治理”“准备发版”时，Agent 才需要读取它们。
 
 ---
 
