@@ -54,23 +54,6 @@ trace/span + eval + issue 回归，支持审计和持续迭代
 - workflow/runtime 层只做过程可见、checkpoint、日志、恢复和回放，不替代人工确认。
 - Badcase 会进入统一脱敏快照和 GitHub issue 协议，变成可追踪的迭代资产。
 
-## 如何制作这类 Agent
-
-这个项目沉淀的是一套制作业务 Agent 的方法，而不只是脚本集合：
-
-1. 先把业务状态外置到数据库或 Lark，避免让 LLM 充当状态机。
-2. 把每个业务节点做成可单独运行、可重跑、可 dry-run 的脚本。
-3. 只在需要判断、解析、归纳的节点使用 LLM，结果立刻写回结构化字段。
-4. 增加稳定唤起 Router，让用户可以用自然语言切入任意 step。
-5. 给高风险节点加 checkpoint，必须人工确认后再继续。
-6. 为每次执行写 workflow_log，并映射为 trace/span，支持回放和审计。
-7. 把 Badcase 脱敏后自动转成 GitHub issue，再沉淀为 eval 回归用例。
-8. 每次改动后跑 eval/regression report，区分主流程改动、旁路观测和文档改动。
-
-这套方法适合迁移到其他“多步骤、跨天、多人协同、需要人工确认”的业务 Agent。
-
----
-
 ## Badcase 回流机制
 
 类似 macOS 崩溃上报 / Sentry 一键上报的逻辑：**VM 感知到问题，标记一下，上下文自动收集**。
@@ -144,8 +127,7 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 - ✨ 新增稳定唤起协议：首次进入资源管理任务需要明确唤起 Agent，短期 session 内可承接“附件用这个”“确认发送”等续接指令。
 - ✨ 新增 `agent_router.py`：识别自然语言中的 step、候选人、record_id、附件、目标状态和 Badcase 期望结果；缺信息时停止并提示，不猜测执行。
 - ✨ 明确 runtime / workflow 边界：Router 负责入口识别，workflow/runtime 负责过程可见、checkpoint、日志与回放，核心业务仍由已验收单点脚本执行。
-- ✨ 新增 `trace_span.py` 和 `run_governance_demo.py`：可生成 workflow、Badcase、trace/span、eval 四合一治理 demo 包和 MP4。
-- 🛡️ 更新 README 的 Agent 架构与制作方法，说明如何把业务 Agent 做成可交接、可审计、可持续迭代的系统。
+- 🛡️ 更新 README 的 Agent 架构与使用边界，说明系统如何稳定唤起、执行、确认和回流问题。
 - ✅ 验证：Agent 治理 eval PASS；隐私扫描 PASS；最终 demo 包 PASS。
 
 ### v2.5（2026-06-12）
