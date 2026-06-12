@@ -56,7 +56,7 @@ export function ChatInputPanel({
         <p className="meta">
           {uploadedAttachment
             ? `已选择：${uploadedAttachment.filename}（${Math.ceil(uploadedAttachment.size / 1024)} KB）`
-            : "测试题邮件和签字合同核查可上传附件；会用本地路径的人也可以直接在对话框粘贴 /Users/... 文件路径。"}
+            : "测试题邮件和签字合同核查可上传附件；会用本地路径的人也可以直接在对话框粘贴本机文件路径。"}
         </p>
       </div>
       {error && <div className="next-box">{error}</div>}

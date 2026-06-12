@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
           event("step_failed", {
             reason: "现有 Agent 脚本不存在或路径不可访问。",
             script: plan.script,
-            expected_root: process.env.LOC_AGENT_SKILL_ROOT ?? "/Users/dataozi/.agents/skills/loc-resume-screening"
+            expected_root: process.env.LOC_AGENT_SKILL_ROOT ?? "~/.agents/skills/loc-resume-screening"
           })
         );
         send(event("run_done", { status: "failed" }));
@@ -307,7 +307,7 @@ export async function POST(request: NextRequest) {
       );
 
       const child = spawn("python3", [plan.script, ...plan.args], {
-        cwd: process.env.LOC_AGENT_SKILL_ROOT ?? "/Users/dataozi/.agents/skills/loc-resume-screening",
+        cwd: process.env.LOC_AGENT_SKILL_ROOT ?? `${process.env.HOME || "~"}/.agents/skills/loc-resume-screening`,
         env: {
           ...process.env,
           PYTHONUNBUFFERED: "1"

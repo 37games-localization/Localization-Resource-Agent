@@ -63,10 +63,13 @@ export type LarkRecordLocator = {
   value: string;
 };
 
-const DEFAULT_SKILL_ROOT = "/Users/dataozi/.agents/skills/loc-resume-screening";
+function defaultSkillRoot() {
+  const home = process.env.HOME || "~";
+  return `${home}/.agents/skills/loc-resume-screening`;
+}
 
 export function getSkillRoot() {
-  return process.env.LOC_AGENT_SKILL_ROOT ?? DEFAULT_SKILL_ROOT;
+  return process.env.LOC_AGENT_SKILL_ROOT ?? defaultSkillRoot();
 }
 
 export function getSkillConfigPath() {

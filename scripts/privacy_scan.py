@@ -20,6 +20,7 @@ from pathlib import Path
 
 DEFAULT_SKIP = {
     "references/legacy-pricing-rules-2026-05-28.json",
+    "frontend/package-lock.json",
 }
 
 PATTERNS: list[tuple[str, str]] = [
