@@ -526,6 +526,15 @@ git log --oneline
 - [ ] **Trace / Span 标准化**：将 workflow_log 升级为可按 run_id 回放的标准 trace-span 观测模型，支持审计、排查和 Badcase 归因
 - [ ] **Eval 自动化与开发后 Regression Report**：建立固定测试集，每次改动后自动区分主流程影响、旁路观测影响、前端展示影响和需生产验证项
 
+### 🟣 P3 — 生产化治理与长期运营边界
+
+- [ ] **合同产物回写候选人主表**：合同 docx 生成后，上传到资源商简历信息所在行的「生成合同附件」字段；本地文件只作为临时缓存，Lark 候选人主表保留最终可查版本。
+- [ ] **邮箱草稿箱集成**：当前先保留 `.eml` / draft 文件路径；后续评估接入外部邮箱草稿箱，让合同/测试/婉拒邮件写入真实草稿箱，由 VM 人工检查后发送。
+- [ ] **Trace 证据 Git 归档**：将脱敏 trace/span、eval report、regression report、badcase snapshot 摘要按 run_id 或日期推送到 Git 仓库长期保留；录屏和一次性 demo 素材不纳入长期归档。
+- [ ] **QA 回归责任矩阵**：明确改评分、合同、邮件、Router、前端、Lark mapping、README 时分别必须跑哪些测试，哪些需要 VM 生产验证，哪些只需自动化回归。
+- [ ] **维护责任矩阵**：明确 VM、项目维护者、业务负责人、IT/平台、Agent 各自维护什么：规则、模板、权限、SMTP/邮箱、Lark bot、badcase 处理、发版回归和生产事故排查。
+- [ ] **权限边界梳理**：区分谁能读取候选人主表、合同敏感信息、合同模板、workflow_log、badcase snapshot；谁能触发 production、发送邮件、修改评分规则、修改合同模板和 push issue。
+
 
 ---
 

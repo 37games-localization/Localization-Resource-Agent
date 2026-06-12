@@ -216,6 +216,17 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 - GitHub issue、README、handover、QA 报告只允许出现脱敏信息；不要写真实 base token、table id、邮箱、候选人姓名、本地路径、合同编号或供应商编号。
 - 评分规则配置表是生产评分必需表，且允许独立配置 `pricing_rules.base_token/table_id`；VM 更换简历收集表时不应默认重建规则表。规则变更会影响评分和评级，必须记录维护人、变更原因和生效时间。
 
+## 生产化治理待办
+
+以下不是当前单点能力可用性的阻塞项，而是长期交给多人稳定使用前需要补齐的治理边界：
+
+- 合同生成后应上传到候选人主表「生成合同附件」字段，避免合同 docx 只散落在 VM 本地目录。
+- 邮件草稿箱集成暂缓：当前可继续使用 `.eml` / draft 机制；后续再评估外部邮箱草稿箱写入。
+- Trace 证据需要脱敏后推送到 Git 仓库长期保留；录屏和一次性 demo 素材不进入长期归档。
+- QA 回归需要形成责任矩阵：不同类型改动对应不同测试和生产验证要求。
+- 维护责任需要形成责任矩阵：VM、项目维护者、业务负责人、IT/平台、Agent 分别负责规则、模板、权限、邮箱、Lark bot、badcase 和发版回归。
+- 权限边界需要梳理：合同敏感信息、候选人主表、合同模板、workflow_log、badcase snapshot、production 写回、邮件发送、GitHub issue push 分别由谁可读/可写/可触发。
+
 ## 过程可见层边界
 
 过程可见层可以做：
