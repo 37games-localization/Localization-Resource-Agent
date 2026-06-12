@@ -155,8 +155,8 @@
 - `scripts/run_testmode_demo.py`：真实 TEST_MODE 证据采集。
 - `scripts/workflow_runner.py` / `scripts/run_dialog.py`：对话式/手动串联入口。
 - `scripts/verify_pricing_rule_coverage.py`：22 个主流市场语言对覆盖检查。
-- `/Users/dataozi/Documents/个人知识库管理/scripts/record_resource_agent_terminal_demo.py`：现有终端风格录制脚本，可改造成最终视频输入层。
-- `/Users/dataozi/Documents/个人知识库管理/outputs/loc-resource-agent-demo.html`：现有 HTML 说明页，可作为补充材料。
+- 现有终端风格录制脚本：可改造成最终视频输入层。
+- 现有 HTML 说明页：可作为补充材料。
 
 ## 下一步
 

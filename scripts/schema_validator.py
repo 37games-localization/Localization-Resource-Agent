@@ -42,6 +42,15 @@ def write_yaml(path: Path, data: dict):
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def load_existing_mapping() -> dict:
+    if not MAPPING_PATH.exists():
+        return {}
+    try:
+        return load_yaml(MAPPING_PATH) or {}
+    except Exception:
+        return {}
+
+
 def norm(text: str) -> str:
     return "".join(str(text or "").lower().replace("（", "(").replace("）", ")").split())
 
@@ -200,7 +209,19 @@ def create_missing_table(base_token: str, table_def: dict, yes: bool) -> str:
     return table_id
 
 
-def match_required_field(field_def: dict, actual_fields: list[dict]) -> tuple[dict | None, str, float]:
+def match_required_field(
+    field_def: dict,
+    actual_fields: list[dict],
+    existing_table_mapping: dict | None = None,
+) -> tuple[dict | None, str, float]:
+    existing_fields = (existing_table_mapping or {}).get("fields") or {}
+    existing = existing_fields.get(field_def.get("key", "")) or {}
+    existing_field_id = existing.get("field_id")
+    if existing_field_id:
+        for field in actual_fields:
+            if field.get("field_id") == existing_field_id:
+                return field, existing.get("match_type") or "existing_mapping", 1.0
+
     names = [field_def.get("name", "")] + field_def.get("aliases", [])
     by_exact = {}
     for field in actual_fields:
@@ -226,15 +247,23 @@ def match_required_field(field_def: dict, actual_fields: list[dict]) -> tuple[di
     return None, "missing", 0.0
 
 
-def validate_table(table_key: str, base_token: str, table_id: str, actual_fields: list[dict], required_fields: list[dict]) -> dict:
+def validate_table(
+    table_key: str,
+    base_token: str,
+    table_id: str,
+    actual_fields: list[dict],
+    required_fields: list[dict],
+    existing_mapping: dict | None = None,
+) -> dict:
     mapped = {}
     missing = []
     fuzzy = []
     type_mismatches = []
     matched_actual_ids = set()
+    existing_table_mapping = ((existing_mapping or {}).get("tables") or {}).get(table_key) or {}
 
     for req in required_fields:
-        found, match_type, score = match_required_field(req, actual_fields)
+        found, match_type, score = match_required_field(req, actual_fields, existing_table_mapping)
         if not found:
             if req.get("required", False) or req.get("create_if_missing", False):
                 missing.append(req)
@@ -380,6 +409,7 @@ def main():
     args = parser.parse_args()
 
     schema = load_yaml(REQUIRED_SCHEMA_PATH)
+    existing_mapping = load_existing_mapping()
     table_keys = list(schema.get("tables", {}).keys()) if args.table == "all" else [args.table]
     results = []
 
@@ -408,6 +438,7 @@ def main():
                         table_id=table_id,
                         actual_fields=actual_fields,
                         required_fields=table_def.get("required_fields", []),
+                        existing_mapping=existing_mapping,
                     )
                     print_report(result)
                     results.append(result)
@@ -446,6 +477,7 @@ def main():
                         table_id=table_id,
                         actual_fields=actual_fields,
                         required_fields=table_def.get("required_fields", []),
+                        existing_mapping=existing_mapping,
                     )
                     print_report(result)
                     results.append(result)
@@ -473,6 +505,7 @@ def main():
             table_id=table_id,
             actual_fields=actual_fields,
             required_fields=table_def.get("required_fields", []),
+            existing_mapping=existing_mapping,
         )
         print_report(result)
 
@@ -485,6 +518,7 @@ def main():
                 table_id=table_id,
                 actual_fields=actual_fields,
                 required_fields=table_def.get("required_fields", []),
+                existing_mapping=existing_mapping,
             )
             print("\n创建字段后重新校验：")
             print_report(result)

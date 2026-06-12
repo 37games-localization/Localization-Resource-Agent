@@ -59,6 +59,7 @@ SCHEMA_AND_QA = {
     "scripts/schema_inspector.py": "表结构读取工具",
     "scripts/integration_readiness.py": "只读集成验收",
     "scripts/regression_report.py": "只读变更回归报告",
+    "scripts/eval_runner.py": "Agent 治理 eval 自动化入口",
     "scripts/verify_pricing_rule_coverage.py": "评分规则主流市场覆盖检查",
     "references/lark-required-schema.yaml": "Lark 必需字段定义",
     "references/lark-field-dictionary.md": "字段语义字典",

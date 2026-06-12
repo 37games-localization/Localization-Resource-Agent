@@ -38,6 +38,13 @@ from badcase_protocol import (
 from trace_span import span_from_workflow_step, validate_span
 from agent_router import ActiveAgentSession, classify_instruction
 from config_loader import get_table_ref
+from eval_runner import (
+    EvalCase,
+    build_spans,
+    overall_status,
+    parse_case_output,
+)
+from schema_validator import validate_table
 
 
 class LarkRecordNormalizeTest(unittest.TestCase):
@@ -573,6 +580,124 @@ class ConfigTableRefTest(unittest.TestCase):
         }
 
         self.assertEqual(get_table_ref(cfg, "contract_info"), ("contract_base", "contract_table"))
+
+
+class EvalRunnerTest(unittest.TestCase):
+    def test_overall_status_prioritizes_fail_then_changed(self):
+        self.assertEqual(overall_status([{"status": "pass"}]), "pass")
+        self.assertEqual(overall_status([{"status": "pass"}, {"status": "changed"}]), "changed")
+        self.assertEqual(overall_status([{"status": "changed"}, {"status": "fail"}]), "fail")
+
+    def test_pricing_coverage_output_maps_to_pass_metrics(self):
+        case = EvalCase(
+            case_id="pricing_rule_coverage",
+            title="coverage",
+            command=["python3", "scripts/verify_pricing_rule_coverage.py"],
+            kind="lark_config_eval",
+        )
+        result = parse_case_output(
+            case,
+            json.dumps({
+                "ok": True,
+                "table_id": "tbl_test",
+                "required_count": 22,
+                "available_count": 22,
+                "missing": [],
+                "extra": [],
+            }),
+            "",
+            0,
+            False,
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["metrics"]["missing_count"], 0)
+        self.assertEqual(result["metrics"]["extra_count"], 0)
+
+    def test_regression_report_need_node_qa_maps_to_changed_not_fail(self):
+        case = EvalCase(
+            case_id="regression_report",
+            title="regression",
+            command=["python3", "scripts/regression_report.py", "--json"],
+            kind="change_impact_eval",
+            allow_changed=True,
+        )
+        result = parse_case_output(
+            case,
+            json.dumps({
+                "gate": "NEEDS_NODE_QA",
+                "conclusion": "存在主流程影响改动",
+                "counts": {"main_flow": 1},
+            }, ensure_ascii=False),
+            "",
+            0,
+            False,
+        )
+
+        self.assertEqual(result["status"], "changed")
+        self.assertIn("gate=NEEDS_NODE_QA", result["notes"])
+
+    def test_eval_spans_are_sanitized_and_valid(self):
+        spans = build_spans(
+            "eval_test",
+            [{
+                "case_id": "privacy",
+                "title": "隐私扫描",
+                "kind": "safety_eval",
+                "status": "pass",
+                "command": ["python3", "scripts/privacy_scan.py"],
+                "duration_ms": 12,
+                "metrics": {},
+                "notes": ["sent to person@example.com is redacted"],
+            }],
+        )
+
+        self.assertEqual(len(spans), 1)
+        validate_span(spans[0])
+        dumped = json.dumps(spans[0], ensure_ascii=False)
+        self.assertNotIn("person@example.com", dumped)
+
+
+class SchemaValidatorMappingTest(unittest.TestCase):
+    def test_existing_field_mapping_takes_priority_over_exact_name_formula(self):
+        required = [{
+            "key": "candidate.score",
+            "name": "总分",
+            "aliases": ["AI评分", "评分", "Score"],
+            "type": "number",
+            "required": True,
+        }]
+        actual = [
+            {"field_id": "fld_formula", "name": "总分", "type": "formula"},
+            {"field_id": "fld_agent_score", "name": "Agent总分", "type": "number"},
+        ]
+        existing_mapping = {
+            "tables": {
+                "candidate": {
+                    "fields": {
+                        "candidate.score": {
+                            "field_id": "fld_agent_score",
+                            "field_name": "Agent总分",
+                            "match_type": "manual",
+                        }
+                    }
+                }
+            }
+        }
+
+        result = validate_table(
+            table_key="candidate",
+            base_token="base",
+            table_id="table",
+            actual_fields=actual,
+            required_fields=required,
+            existing_mapping=existing_mapping,
+        )
+
+        self.assertEqual(result["mapped"]["candidate.score"]["field_id"], "fld_agent_score")
+        self.assertEqual(result["mapped"]["candidate.score"]["field_name"], "Agent总分")
+        self.assertEqual(result["mapped"]["candidate.score"]["match_type"], "manual")
+        self.assertEqual(result["type_mismatches"], [])
 
 
 if __name__ == "__main__":

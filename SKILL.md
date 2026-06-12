@@ -62,6 +62,7 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
 | `run_testmode_demo.py` | 真实 TEST_MODE demo 证据采集：调用现有脚本并保存 transcript/summary | 「跑一遍真实测试demo」「录制前验证」 |
 | `integration_readiness.py` | v2 分步骤集成验收：只读检查原脚本、v2包装、schema映射，不执行业务动作 | 「检查v2现在能不能进入生产验证」「做一轮集成验收」 |
+| `eval_runner.py` | Agent 治理 eval：统一运行回归、规则覆盖、集成验收、隐私扫描并输出 JSON/Markdown 证据 | 「跑一轮 Agent 治理 eval」 |
 | `regression_report.py` | 变更后回归报告：区分主流程影响、旁路观测、准入/QA、文档改动 | 「改完后影响哪些主流程」「出一份回归报告」 |
 | `verify_pricing_rule_coverage.py` | 读取 Lark 评分规则表，检查 22 个主流市场语言对是否齐全 | 「检查评分规则语种覆盖」 |
 
@@ -115,6 +116,21 @@ python3 scripts/integration_readiness.py
 字段说明见 [`references/lark-field-dictionary.md`](references/lark-field-dictionary.md)。这份文档用于生产表迁移：即使 VM 修改表头，也能知道 `candidate.score`、`workflow.output_summary`、`contract.bank_account_number` 等内部 key 分别存什么信息。
 
 当前建议：先验收 `score` / `test-email` / `contract` 三个手动子命令；`workflow_runner.py next` 暂不作为唯一主入口，等单步骤包装稳定后再启用。
+
+### Agent 治理 Eval
+
+开发改动后可运行统一 eval 入口：
+
+```bash
+python3 scripts/eval_runner.py
+```
+
+输出目录默认在 `~/.loc-resume-eval-runs/YYYYMMDD-HHMMSS/`，包含：
+- `eval_report.json`：机器可读结果，含 `run_id`、case 结果、脱敏 trace/span。
+- `summary.md`：人类可读摘要。
+- `*.stdout.txt` / `*.stderr.txt`：各检查命令证据。
+
+Eval runner 只做准入/QA，不写 Lark、不发邮件、不生成真实合同、不推进状态。`pass` 表示检查通过；`changed` 表示检查命令通过但存在需要关注的变更影响面；`fail` 表示不能宣称本轮稳定。
 
 ### 受控手动串联
 
