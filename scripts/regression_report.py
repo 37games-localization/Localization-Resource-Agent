@@ -52,6 +52,7 @@ OBSERVATION_LAYER = {
     "scripts/generate_contract_v2.py": "合同生成可视化包装层",
     "scripts/run_testmode_demo.py": "Demo 证据采集工具",
     "scripts/run_fixture_demo.py": "脱敏最终演示 fixture runner，只生成旁路证据和 checkpoint transcript",
+    "scripts/run_governance_demo.py": "最终治理演示编排器，组合 workflow、badcase、trace/span、eval 证据，不执行业务写入",
 }
 
 SCHEMA_AND_QA = {

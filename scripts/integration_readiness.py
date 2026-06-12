@@ -12,7 +12,6 @@ mapping gate is ready for each operation.
 
 import argparse
 import json
-import py_compile
 import sys
 from pathlib import Path
 
@@ -86,7 +85,7 @@ def check_file(path: Path) -> dict:
 
 def check_compile(path: Path) -> dict:
     try:
-        py_compile.compile(str(path), doraise=True)
+        compile(path.read_text(encoding="utf-8"), str(path), "exec")
         return {"path": str(path.relative_to(SKILL_DIR)), "ok": True, "message": "compile ok"}
     except Exception as exc:
         return {"path": str(path.relative_to(SKILL_DIR)), "ok": False, "message": str(exc)}

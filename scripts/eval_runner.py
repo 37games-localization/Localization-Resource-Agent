@@ -101,15 +101,16 @@ def run_case(case: EvalCase, out_dir: Path) -> dict[str, Any]:
     started_at = datetime.now().isoformat(timespec="seconds")
     started = time.time()
     timed_out = False
+    command = command_for_case(case, out_dir)
     try:
         proc = subprocess.run(
-            case.command,
+            command,
             cwd=SKILL_DIR,
             capture_output=True,
             text=True,
             encoding="utf-8",
             timeout=case.timeout,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
             check=False,
         )
         returncode = proc.returncode
@@ -133,7 +134,7 @@ def run_case(case: EvalCase, out_dir: Path) -> dict[str, Any]:
         "timed_out": timed_out,
         "duration_ms": duration_ms,
         "started_at": started_at,
-        "command": case.command,
+        "command": command,
         "stdout_tail": clean_tail(stdout),
         "stderr_tail": clean_tail(stderr, limit=6000),
         "metrics": parsed.get("metrics", {}),
@@ -143,6 +144,12 @@ def run_case(case: EvalCase, out_dir: Path) -> dict[str, Any]:
     (out_dir / f"{case.case_id}.stdout.txt").write_text(stdout, encoding="utf-8")
     (out_dir / f"{case.case_id}.stderr.txt").write_text(stderr, encoding="utf-8")
     return evidence
+
+
+def command_for_case(case: EvalCase, out_dir: Path) -> list[str]:
+    if case.case_id == "demo_fixture_matrix":
+        return [*case.command, "--output-dir", str(out_dir / case.case_id)]
+    return case.command
 
 
 def parse_case_output(
