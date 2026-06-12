@@ -139,6 +139,24 @@ OpenClaw 会自动检查：
 
 ---
 
+## 可选：打开前端工作台
+
+配置验证通过后，你可以直接对 Agent 说：
+
+```text
+打开资源管理工作台
+```
+
+Agent 会执行：
+
+```bash
+python3 scripts/start_frontend.py
+```
+
+前端会读取你本机的 `config.local.yaml` 和 Lark 字段映射，展示候选人列表、真实执行事件流、checkpoint 和 workflow_log。
+
+注意：同一个前端同时服务 dry-run、TEST_MODE 和 production。页面会显示当前真实执行模式；dry-run 不会被当成已写回。
+
 ## 第六步：TEST_MODE 完整走一遍
 
 对 OpenClaw 说：**「帮我走一遍测试流程」**，OpenClaw 会引导你：

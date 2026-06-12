@@ -65,6 +65,23 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 
 所有脚本优先从 skill 根目录下的 `config.local.yaml` 读取本机配置；未生成时才读取模板 `config.yaml`。
 
+### 本地前端工作台
+
+当 VM 说「打开资源管理工作台」或「启动前端」时，执行：
+
+```bash
+cd ~/.agents/skills/loc-resume-screening
+python3 scripts/start_frontend.py
+```
+
+启动后把访问地址告诉 VM，默认是 `http://127.0.0.1:3000/agent-visual`。
+
+说明：
+- 这是同一个真实工作台，不区分 demo 前端和生产前端。
+- `DRY-RUN` / `TEST MODE` / `PRODUCTION` 由页面运行模式和后端脚本共同决定。
+- 页面读取 `config.local.yaml`、`config/lark-field-mapping.yaml`、Lark 候选人表和 `workflow_log`。
+- dry-run 不允许被前端伪装成已写回；只有 production 简历评估 checkpoint 才允许确认/修改写回。
+
 ### 生产运行门禁
 
 `test_mode.enabled=true` 时，业务脚本不强制阻断，方便 TEST_MODE demo 和单步验证。

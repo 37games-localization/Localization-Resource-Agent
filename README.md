@@ -125,6 +125,28 @@ cp config.example.yaml config.local.yaml
 
 ---
 
+## 前端工作台
+
+VM 安装并完成配置后，可以直接对 Agent 说：
+
+```text
+打开资源管理工作台
+```
+
+Agent 会启动本地前端，并给出访问地址，默认是：
+
+```text
+http://127.0.0.1:3000/agent-visual
+```
+
+这个前端不是单独的 demo。它读取 VM 本机 `config.local.yaml` 和字段映射，直接连接 Lark 候选人表、流程日志表和现有业务脚本。同一个页面支持 `DRY-RUN`、`TEST MODE` 和 `PRODUCTION`，页面会显示本次真实执行模式、是否写回、是否发送、是否需要人工确认。
+
+手动启动命令：
+
+```bash
+python3 scripts/start_frontend.py
+```
+
 ## 更新日志
 
 ### v2.4（2026-06-11）
@@ -206,6 +228,7 @@ loc-resume-screening/
 ├── config.local.yaml           # ← VM 本机唯一需要编辑的文件（不提交）
 ├── config/
 │   └── resume_screening_rules_v2.json   # 评分规则（价格/年限/字数）
+├── frontend/                   # 本地前端工作台（/agent-visual）
 ├── scripts/
 │   ├── generate_contract.py    # 合同生成 + 发送
 │   ├── send_test_email.py      # 测试题邮件
