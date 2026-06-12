@@ -1,6 +1,6 @@
 # 本地化资源管理 Agent
 
-> Localization Resource Agent · 当前版本：v2.4
+> Localization Resource Agent · 当前版本：v2.5
 
 覆盖外部译者从**投简历到正式入库**的完整招募链路，通过自然语言指令驱动，飞书多维表格作为数据中枢。当前版本已进入生产端验证闭环：单点能力可独立调用，关键节点有日志/人工确认/安全准备模式，Badcase 可回流到 GitHub issue 追踪修复。
 
@@ -31,7 +31,7 @@
 | 项目 | 状态 |
 |------|------|
 | 远端分支 | `v2-workflow-viz` |
-| 当前稳定提交 | `1bb2a74` |
+| 当前稳定提交 | `bca5b9d` |
 | 上一个 QA tag | `v0.1-single-node-qa` |
 | 回滚方式 | Git 保留完整提交历史，可用 `git revert` 回退合并提交，或拉回指定 tag/commit |
 
@@ -148,6 +148,17 @@ python3 scripts/start_frontend.py
 ```
 
 ## 更新日志
+
+### v2.5（2026-06-12）
+**本地前端工作台上线**
+
+- ✨ 新增 `frontend/` 本地前端工作台：VM 可通过浏览器查看 Lark 候选人、Agent 执行事件流、checkpoint 和 `workflow_log`。
+- ✨ 新增 `scripts/start_frontend.py`：VM 只需对 Agent 说「打开资源管理工作台」，Agent 会自动安装前端依赖、启动本地服务并告知访问地址。
+- ✨ 前端支持同一页面切换 `DRY-RUN` / `TEST MODE` / `PRODUCTION`，不再区分 demo 前端和生产前端。
+- 🛡️ 保留 dry-run / 未写回 / 未发送语义：前端不会把预览结果伪装成真实写回。
+- 🛡️ 简历评估 checkpoint 增加写回边界：只有 production 简历评估 checkpoint 可确认/修改；测试题、合同、签字核查不能误走简历确认接口。
+- 📝 README、SKILL 和 onboarding 已补充前端启动说明。
+- ✅ 验证：前端 `npm run check`、`npx tsc --noEmit` 通过；启动脚本实测可打开 `/agent-visual`；评分引擎测试 25/25 通过。
 
 ### v2.4（2026-06-11）
 **生产端验证修复 + 工作流可视化稳定版**
