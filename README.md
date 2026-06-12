@@ -26,34 +26,6 @@
 
 ---
 
-## Agent 架构
-
-这不是一个依赖聊天上下文记忆的长流程 Agent，而是一个“自然语言入口 + 确定性脚本 + Lark 状态机”的业务系统。
-
-```text
-VM 自然语言
-  ↓
-稳定唤起 Router（识别资源管理 Agent / step / 候选人 / 缺失信息）
-  ↓
-Lark 读取真实状态（候选人、合同、评分规则、workflow_log）
-  ↓
-单点脚本执行（简历解析、评分、测试题、合同、签字核查、状态推进）
-  ↓
-checkpoint 人工确认（高风险动作暂停）
-  ↓
-Lark 写回状态、结果、日志、Badcase 快照
-  ↓
-trace/span + eval + issue 回归，支持审计和持续迭代
-```
-
-核心边界：
-
-- Lark 是唯一事实来源，Agent 不靠上下文记住候选人状态。
-- Router 只负责识别意图和前置条件，不重写评分、合同选择、邮件生成等业务逻辑。
-- 单点脚本可以独立调用，也可以被 workflow 串联调用。
-- workflow/runtime 层只做过程可见、checkpoint、日志、恢复和回放，不替代人工确认。
-- Badcase 会进入统一脱敏快照和 GitHub issue 协议，变成可追踪的迭代资产。
-
 ## Badcase 回流机制
 
 类似 macOS 崩溃上报 / Sentry 一键上报的逻辑：**VM 感知到问题，标记一下，上下文自动收集**。
@@ -85,10 +57,6 @@ git checkout main
 也可以下载 `.skill` 文件后解压到 `~/.agents/skills/loc-resume-screening/`。
 
 Windows 用户如果不确定怎么装，直接让 Agent 按 onboarding 指引带着配置，不需要先理解 WSL / 依赖 / 路径差异。
-
-### Docker 说明
-
-当前推荐仍是本机安装 skill：它需要访问本地简历附件、合同模板、邮件草稿、Lark CLI / GitHub CLI 登录态，以及 OpenClaw / Codex 的本机 Agent 环境。Docker 更适合后续做公开版的一键 demo、CI eval、或部署独立前后端服务；不建议作为 VM 当前日常使用的首选安装方式。
 
 ---
 
