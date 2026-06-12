@@ -19,7 +19,9 @@ from generate_contract import (
     FLD_BANK_ADDR,
     FLD_BANK_NAME,
     FLD_CURRENCY,
+    FLD_CURRENCY_OTHER,
     FLD_ID_NO,
+    contract_currency_text,
     is_domestic_personal_account,
     send_email,
     score_contract_template,
@@ -260,6 +262,16 @@ class ContractTemplateRoutingTest(unittest.TestCase):
     def test_overseas_personal_foreign_currency_recommends_personal_foreign_template(self):
         fields = self.personal_fields(domestic=False, currency="USD 美元")
 
+        self.assertEqual(
+            self.recommend(fields),
+            "（个人-外币-个人账户）翻译委托框架协议_LOC Demo.docx",
+        )
+
+    def test_other_currency_text_drives_foreign_currency_template(self):
+        fields = self.personal_fields(domestic=False, currency="其他 Other")
+        fields[FLD_CURRENCY_OTHER] = "JPY"
+
+        self.assertEqual(contract_currency_text(fields), "JPY")
         self.assertEqual(
             self.recommend(fields),
             "（个人-外币-个人账户）翻译委托框架协议_LOC Demo.docx",

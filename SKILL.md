@@ -76,6 +76,7 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
 | `run_testmode_demo.py` | 真实 TEST_MODE demo 证据采集：调用现有脚本并保存 transcript/summary | 「跑一遍真实测试demo」「录制前验证」 |
 | `run_fixture_demo.py` | 最终演示虚拟测试集矩阵：脱敏候选人、多分支 checkpoint、trace/span 证据 | 「跑一遍演示测试集」「检查最终demo素材」 |
+| `seed_demo_contract_info.py` | 将脱敏 demo 候选人的合同信息写入当前 Lark 合同信息表，供工作台和合同节点演示 | 「补齐演示合同信息」「初始化 demo 合同表」 |
 | `integration_readiness.py` | v2 分步骤集成验收：只读检查原脚本、v2包装、schema映射，不执行业务动作 | 「检查v2现在能不能进入生产验证」「做一轮集成验收」 |
 | `eval_runner.py` | Agent 治理 eval：统一运行回归、规则覆盖、集成验收、隐私扫描并输出 JSON/Markdown 证据 | 「跑一轮 Agent 治理 eval」 |
 | `replay_run.py` | Agent 运行回放：按 run_id 或 eval_report 重建 trace/span 时间线 | 「回放这次 Agent 运行」「按 run_id 看执行过程」 |

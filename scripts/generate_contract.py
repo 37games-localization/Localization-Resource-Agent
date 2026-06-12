@@ -59,6 +59,7 @@ FLD_ID_NO     = field_id_or("contract_info", "contract.id_number", "fld3hdHuVd")
 FLD_BANK_NAME = field_id_or("contract_info", "contract.bank_name", "fldyPyrLdp")
 FLD_BANK_ADDR = field_id_or("contract_info", "contract.bank_address", "fldDLk0Jh9")
 FLD_CURRENCY  = field_id_or("contract_info", "contract.currency", "fldSZE1Shy")
+FLD_CURRENCY_OTHER = field_id_or("contract_info", "contract.currency_other", "fldAvjeC5F")
 
 
 # ── lark-cli 工具 ──────────────────────────────────────────────
@@ -176,6 +177,20 @@ def extract_text(val) -> str:
     return text
 
 
+def contract_currency_text(fields: dict) -> str:
+    """Return the effective currency, including the Lark "Other" text field.
+
+    The production form stores common currencies in a select field. JPY/EUR/KRW
+    and similar values are captured as "其他 Other" plus a companion text field.
+    Template routing needs the actual text, not only the select label.
+    """
+    primary = extract_text(fields.get(FLD_CURRENCY, ""))
+    other = extract_text(fields.get(FLD_CURRENCY_OTHER, ""))
+    if other and ("其他" in primary or "other" in primary.lower()):
+        return other
+    return primary or other
+
+
 def is_china_id_number(text: str) -> bool:
     """Return True for common mainland China resident ID format."""
     value = extract_text(text).replace(" ", "")
@@ -218,12 +233,12 @@ def is_company_account(fields: dict) -> bool:
 
 
 def is_cny_currency(fields: dict) -> bool:
-    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
+    currency = contract_currency_text(fields).lower()
     return "人民币" in currency or "cny" in currency or "rmb" in currency
 
 
 def is_foreign_currency(fields: dict) -> bool:
-    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
+    currency = contract_currency_text(fields).lower()
     if not currency:
         return False
     foreign_markers = [
@@ -429,6 +444,16 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
         if var in contract_defaults:
             var_map[key] = str(contract_defaults[var])
             filled.append(var)
+            continue
+
+        # 2.6 收款货币可能由 select + Other-Text 组合而成
+        if var == "币种":
+            val = contract_currency_text(fields)
+            var_map[key] = val
+            if val:
+                filled.append(var)
+            else:
+                empty.append(var)
             continue
 
         # 3. 收集表字段

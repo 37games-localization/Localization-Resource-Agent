@@ -53,6 +53,7 @@ OBSERVATION_LAYER = {
     "scripts/run_testmode_demo.py": "Demo 证据采集工具",
     "scripts/run_fixture_demo.py": "脱敏最终演示 fixture runner，只生成旁路证据和 checkpoint transcript",
     "scripts/run_governance_demo.py": "最终治理演示编排器，组合 workflow、badcase、trace/span、eval 证据，不执行业务写入",
+    "scripts/seed_demo_contract_info.py": "脱敏 demo 合同信息 seed 工具，只写入测试/演示合同信息，不接管合同生成判断",
 }
 
 SCHEMA_AND_QA = {

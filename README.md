@@ -252,6 +252,7 @@ loc-resume-screening/
 │   ├── eval_runner.py          # Agent 治理 eval 统一入口
 │   ├── replay_run.py           # Agent run_id / eval_report 回放
 │   ├── run_fixture_demo.py     # 脱敏最终演示测试集 runner
+│   ├── seed_demo_contract_info.py # 写入脱敏 demo 合同信息到当前 Lark 合同信息表
 │   ├── run_governance_demo.py  # 最终治理 demo 包与 MP4 生成
 │   ├── verify_pricing_rule_coverage.py # 检查 Lark 评分规则主流市场覆盖
 │   ├── workflow_runner.py      # 手动串联入口
