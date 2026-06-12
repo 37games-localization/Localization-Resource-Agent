@@ -45,6 +45,11 @@ from eval_runner import (
     parse_case_output,
 )
 from schema_validator import validate_table
+from replay_run import (
+    build_replay_from_eval_report,
+    build_replay_from_workflow,
+    span_from_workflow_log_row,
+)
 
 
 class LarkRecordNormalizeTest(unittest.TestCase):
@@ -698,6 +703,93 @@ class SchemaValidatorMappingTest(unittest.TestCase):
         self.assertEqual(result["mapped"]["candidate.score"]["field_name"], "Agent总分")
         self.assertEqual(result["mapped"]["candidate.score"]["match_type"], "manual")
         self.assertEqual(result["type_mismatches"], [])
+
+
+class ReplayRunTest(unittest.TestCase):
+    def test_workflow_log_row_converts_to_valid_sanitized_span(self):
+        row = {
+            "record_id": "rec-log-1",
+            "workflow.run_id": "run-test",
+            "workflow.step_name": "测试题邮件发送",
+            "workflow.step_type": "action",
+            "workflow.status": "done",
+            "workflow.input_summary": "发送至 person@example.com",
+            "workflow.output_summary": "状态=📤 测试中",
+            "workflow.created_at": 1760000000000,
+        }
+
+        span = span_from_workflow_log_row(row)
+
+        validate_span(span)
+        self.assertEqual(span["run_id"], "run-test")
+        self.assertEqual(span["span_type"], "tool_call")
+        self.assertEqual(span["status"], "success")
+        dumped = json.dumps(span, ensure_ascii=False)
+        self.assertNotIn("person@example.com", dumped)
+
+    def test_workflow_rows_build_replay_status_waiting(self):
+        replay = build_replay_from_workflow([
+            {
+                "record_id": "rec-log-1",
+                "workflow.run_id": "run-test",
+                "workflow.candidate_record_id": "rec-candidate",
+                "workflow.candidate_name": "测试候选人",
+                "workflow.step_name": "评分重算",
+                "workflow.step_type": "action",
+                "workflow.status": "done",
+                "workflow.input_summary": "语言对: 简中>韩语",
+                "workflow.output_summary": "总分=92",
+                "workflow.created_at": 1760000000000,
+            },
+            {
+                "record_id": "rec-log-2",
+                "workflow.run_id": "run-test",
+                "workflow.candidate_record_id": "rec-candidate",
+                "workflow.candidate_name": "测试候选人",
+                "workflow.step_name": "初筛结果确认",
+                "workflow.step_type": "checkpoint",
+                "workflow.status": "waiting",
+                "workflow.input_summary": '{"score": 92}',
+                "workflow.output_summary": '{"checkpoint_token": "ckpt-test"}',
+                "workflow.created_at": 1760000001000,
+            },
+        ])
+
+        self.assertEqual(replay["run_id"], "run-test")
+        self.assertEqual(replay["status"], "waiting_confirmation")
+        self.assertEqual(replay["span_count"], 2)
+        self.assertEqual(replay["spans"][1]["span_type"], "checkpoint")
+
+    def test_eval_report_can_be_replayed(self):
+        import tempfile
+
+        span = build_spans(
+            "eval-test",
+            [{
+                "case_id": "privacy",
+                "title": "隐私扫描",
+                "kind": "safety_eval",
+                "status": "pass",
+                "command": ["python3", "scripts/privacy_scan.py"],
+                "duration_ms": 1,
+                "metrics": {},
+                "notes": [],
+            }],
+        )[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "eval_report.json"
+            path.write_text(json.dumps({
+                "run_id": "eval-test",
+                "overall_status": "pass",
+                "spans": [span],
+                "results": [],
+            }, ensure_ascii=False), encoding="utf-8")
+
+            replay = build_replay_from_eval_report(path)
+
+        self.assertEqual(replay["source"], "eval_report")
+        self.assertEqual(replay["run_id"], "eval-test")
+        self.assertEqual(replay["span_count"], 1)
 
 
 if __name__ == "__main__":

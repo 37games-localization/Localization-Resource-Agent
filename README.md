@@ -112,6 +112,7 @@ v2.4 发布说明与 VM 通知话术见 [`references/v2.4-release-notes-2026-06-
 - ✨ 新增 22 个主流市场语言对回归：覆盖英文源 14 个方向、简中源 8 个方向，支持中文标签和“中文 + 英文解释”的双语标签。
 - ✨ 新增 `verify_pricing_rule_coverage.py`：直接读取 Lark「评分规则配置」表，检查主流市场语言对是否齐全，输出 missing / extra / available。
 - ✨ 新增 `eval_runner.py`：统一运行 issue 回归、评分规则测试、Lark 语种覆盖、集成验收、隐私扫描和变更影响报告，输出 JSON + Markdown + trace/span 证据。
+- ✨ 新增 `replay_run.py`：可按 Lark `workflow_log` 的 `run_id` 或本地 `eval_report.json` 回放 Agent 执行时间线，输出 `replay.json` 和 `summary.md`。
 - 🐛 修复 schema 校验的手动映射优先级：已确认的 `candidate.score -> Agent总分` 不再被同名公式字段「总分」误判为类型错误。
 - 🛡️ 更新回归报告分类：价格规则覆盖检查归为准入/QA，避免与业务主流程改动混淆。
 - ✅ 验证：Agent 治理 eval PASS；Lark 实表覆盖 22/22，missing 0，extra 0；issue/eval 回归测试 39/39；评分引擎测试 25/25；schema 全量准入 PASS；集成验收 PASS；隐私扫描 PASS。
@@ -207,6 +208,7 @@ loc-resume-screening/
 │   ├── rescore_and_write.py    # 重算评分并写回飞书
 │   ├── pricing_rules.py        # 读取 Lark 评分规则配置表
 │   ├── eval_runner.py          # Agent 治理 eval 统一入口
+│   ├── replay_run.py           # Agent run_id / eval_report 回放
 │   ├── verify_pricing_rule_coverage.py # 检查 Lark 评分规则主流市场覆盖
 │   ├── workflow_runner.py      # 手动串联入口
 │   ├── workflow_engine.py      # 过程日志/人工确认基础能力

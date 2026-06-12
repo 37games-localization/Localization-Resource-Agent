@@ -206,7 +206,12 @@ def validate_span(span: Mapping[str, Any]) -> None:
         raise ValueError(f"unsupported span_type: {span['span_type']}")
     if span["status"] not in STATUS_VALUES:
         raise ValueError(f"unsupported status: {span['status']}")
-    payload = json.dumps(span, ensure_ascii=False)
+    payload = json.dumps({
+        "input": span.get("input", {}),
+        "output": span.get("output", {}),
+        "error": span.get("error", {}),
+        "token_usage": sanitize_value(span.get("token_usage", {})),
+    }, ensure_ascii=False)
     if EMAIL_RE.search(payload) or LONG_NUMBER_RE.search(payload):
         raise ValueError("trace span contains unsanitized sensitive payload")
 

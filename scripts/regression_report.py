@@ -60,6 +60,7 @@ SCHEMA_AND_QA = {
     "scripts/integration_readiness.py": "只读集成验收",
     "scripts/regression_report.py": "只读变更回归报告",
     "scripts/eval_runner.py": "Agent 治理 eval 自动化入口",
+    "scripts/replay_run.py": "Agent 运行回放和 trace/span 证据导出",
     "scripts/verify_pricing_rule_coverage.py": "评分规则主流市场覆盖检查",
     "references/lark-required-schema.yaml": "Lark 必需字段定义",
     "references/lark-field-dictionary.md": "字段语义字典",
@@ -69,6 +70,7 @@ SCHEMA_AND_QA = {
 DOC_PREFIXES = (
     "references/",
     "HANDOVER.md",
+    "README.md",
     "V2-PROJECT.md",
     "SKILL.md",
 )

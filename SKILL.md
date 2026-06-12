@@ -63,6 +63,7 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `run_testmode_demo.py` | 真实 TEST_MODE demo 证据采集：调用现有脚本并保存 transcript/summary | 「跑一遍真实测试demo」「录制前验证」 |
 | `integration_readiness.py` | v2 分步骤集成验收：只读检查原脚本、v2包装、schema映射，不执行业务动作 | 「检查v2现在能不能进入生产验证」「做一轮集成验收」 |
 | `eval_runner.py` | Agent 治理 eval：统一运行回归、规则覆盖、集成验收、隐私扫描并输出 JSON/Markdown 证据 | 「跑一轮 Agent 治理 eval」 |
+| `replay_run.py` | Agent 运行回放：按 run_id 或 eval_report 重建 trace/span 时间线 | 「回放这次 Agent 运行」「按 run_id 看执行过程」 |
 | `regression_report.py` | 变更后回归报告：区分主流程影响、旁路观测、准入/QA、文档改动 | 「改完后影响哪些主流程」「出一份回归报告」 |
 | `verify_pricing_rule_coverage.py` | 读取 Lark 评分规则表，检查 22 个主流市场语言对是否齐全 | 「检查评分规则语种覆盖」 |
 
@@ -131,6 +132,27 @@ python3 scripts/eval_runner.py
 - `*.stdout.txt` / `*.stderr.txt`：各检查命令证据。
 
 Eval runner 只做准入/QA，不写 Lark、不发邮件、不生成真实合同、不推进状态。`pass` 表示检查通过；`changed` 表示检查命令通过但存在需要关注的变更影响面；`fail` 表示不能宣称本轮稳定。
+
+### Trace / Span 回放
+
+需要审计某次 Agent 运行时，使用只读回放入口：
+
+```bash
+# 从 Lark workflow_log 回放指定 run_id
+python3 scripts/replay_run.py --run-id run-xxxx
+
+# 回放最新一轮 workflow_log
+python3 scripts/replay_run.py --latest
+
+# 回放 eval_runner 生成的 eval_report.json
+python3 scripts/replay_run.py --eval-report ~/.loc-resume-eval-runs/<run>/eval_report.json
+```
+
+输出目录默认在 `~/.loc-resume-replays/YYYYMMDD-HHMMSS/`，包含：
+- `replay.json`：标准 trace/span 时间线。
+- `summary.md`：人类可读运行回放。
+
+Replay 只读 Lark 或本地 eval 报告，不写 Lark、不恢复 checkpoint、不重新执行业务动作。
 
 ### 受控手动串联
 
