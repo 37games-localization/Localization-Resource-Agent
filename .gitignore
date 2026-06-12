@@ -13,3 +13,7 @@ config.yaml.local
 .env
 .env.*
 config/lark-field-mapping.yaml
+frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo

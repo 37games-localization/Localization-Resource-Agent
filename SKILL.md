@@ -1,7 +1,7 @@
 ---
 name: loc-resume-screening
-version: "2.3"
-updated: "2026-06-10"
+version: "2.7"
+updated: "2026-06-12"
 description: "本地化资源管理全流程 skill，覆盖译者简历筛选到入库的完整链路。v2 工作流可视化版：每步行动实时展示，Human Decision 节点支持对话驱动暂停-恢复。触发场景：(1) VM 首次安装配置引导；(2) 新简历入库解析评分；(3) 发测试题邮件；(4) 生成并发送合同；(5) 合同签署核查；(6) 招募状态推进；(7) 手动纠正评分；(8) 全量重算。所有操作以飞书表为单一数据源，脚本确定性执行，不依赖 AI 上下文记忆状态。"
 ---
 
@@ -69,6 +69,23 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `verify_pricing_rule_coverage.py` | 读取 Lark 评分规则表，检查 22 个主流市场语言对是否齐全 | 「检查评分规则语种覆盖」 |
 
 所有脚本优先从 skill 根目录下的 `config.local.yaml` 读取本机配置；未生成时才读取模板 `config.yaml`。
+
+### 本地前端工作台
+
+当 VM 说「打开资源管理工作台」或「启动前端」时，执行：
+
+```bash
+cd ~/.agents/skills/loc-resume-screening
+python3 scripts/start_frontend.py
+```
+
+启动后把访问地址告诉 VM，默认是 `http://127.0.0.1:3000/agent-visual`。
+
+说明：
+- 这是同一个真实工作台，不区分 demo 前端和生产前端。
+- `DRY-RUN` / `TEST MODE` / `PRODUCTION` 由页面运行模式和后端脚本共同决定。
+- 页面读取 `config.local.yaml`、`config/lark-field-mapping.yaml`、Lark 候选人表和 `workflow_log`。
+- dry-run 不允许被前端伪装成已写回；只有 production 简历评估 checkpoint 才允许确认/修改写回。
 
 ### 生产运行门禁
 
