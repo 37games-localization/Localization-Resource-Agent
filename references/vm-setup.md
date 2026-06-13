@@ -88,19 +88,11 @@ python3 scripts/rescore_and_write.py --dry-run --limit 1
 - 「给 测试候选人A 重跑评分」→ 自动跑 rescore_and_write.py
 - 「全量重算评分」→ 全量重跑
 
-## 单点优化
+## 单点调整
 
-想调整评分规则？改这个文件：
-```
-~/.agents/skills/loc-resume-screening/config/resume_screening_rules_v2.json
-```
+想调整评分规则、候选人信息或合同信息，请在对应飞书表里修改，然后让 Agent 重跑对应步骤。
 
-想调整 LLM 解析 prompt？改这个文件第 49 行的 `LLM_PROMPT`：
-```
-~/.agents/skills/loc-resume-screening/scripts/parse_resumes.py
-```
-
-改完直接重跑对应脚本，不需要重装 skill。
+不要直接修改本地脚本、评分引擎、prompt、邮件模板、前端/API 或仓库结构。发现这些地方需要改时，请标记 Badcase 或联系项目维护者。
 
 ## 手动纠正评分
 

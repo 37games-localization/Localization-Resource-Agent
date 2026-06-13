@@ -230,7 +230,7 @@ def validate_snapshot(snapshot: dict) -> None:
         raise ValueError(f"badcase snapshot 缺少必需字段：{', '.join(missing)}")
     hits = scan_sensitive(snapshot)
     if hits:
-        raise ValueError("badcase snapshot 安全扫描命中：" + "; ".join(hits))
+        raise ValueError("badcase snapshot 脱敏校验命中：" + "; ".join(hits))
 
 
 def issue_title(snapshot: dict) -> str:

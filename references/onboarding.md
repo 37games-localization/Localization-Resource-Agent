@@ -141,6 +141,25 @@ OpenClaw 会自动检查：
 
 ---
 
+## 第六步：锁定安装目录
+
+配置验证通过后，对 OpenClaw 说：**「锁定资源管理 Agent 安装目录」**
+
+OpenClaw 会执行：
+
+```bash
+python3 scripts/lock_user_install.py
+```
+
+锁定后：
+- `config.local.yaml`、`config.yaml`、`config/lark-field-mapping.yaml` 仍可正常写入。
+- 核心脚本、评分引擎、前端源码/配置、引用文档和模板规则会变成只读。
+- 当前 Git checkout 会禁用 `git push`，避免误把本地改动推到仓库。
+
+如果日常使用中发现流程结果不符合预期，不要直接改脚本；请把它标记为 Badcase，或联系项目维护者处理。
+
+---
+
 ## 可选：打开前端工作台
 
 配置验证通过后，你可以直接对 Agent 说：
@@ -159,7 +178,7 @@ python3 scripts/start_frontend.py
 
 注意：同一个前端同时服务 dry-run、TEST_MODE 和 production。页面会显示当前真实执行模式；dry-run 不会被当成已写回。
 
-## 第六步：TEST_MODE 完整走一遍
+## 第七步：TEST_MODE 完整走一遍
 
 对 OpenClaw 说：**「帮我走一遍测试流程」**，OpenClaw 会引导你：
 
@@ -173,7 +192,7 @@ python3 scripts/start_frontend.py
 
 ---
 
-## 第七步：正式启用
+## 第八步：正式启用
 
 所有步骤验证通过后，修改 config.local.yaml：
 
@@ -215,7 +234,7 @@ test_mode:
 - VM 侧只生成 `snapshot_version=2.0` 的脱敏 JSON。
 - 不允许不同 Agent 自由拼 GitHub issue 标题和正文。
 - issue 标题、正文、label 统一由 `scripts/badcase_protocol.py` / `scripts/push_badcase_issues.py` 生成。
-- snapshot 校验失败或安全扫描命中时会跳过，不允许强行上传。
+- snapshot 脱敏校验失败时会跳过，不允许强行上传。
 - 禁止包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。
 
 **开启 Badcase 自动导出**：在 `config.local.yaml` 中设置：
@@ -240,17 +259,15 @@ badcase_export:
 
 ---
 
-## 单点优化
-
-想自己调整规则？
+## 单点调整
 
 | 想改什么 | 改哪里 |
 |---------|--------|
-| 评分规则（字数阈值、档位划分、各语言对目标价/上限） | `config/resume_screening_rules_v2.json` |
-| LLM 解析 prompt | `scripts/parse_resumes.py` 第 49 行 `LLM_PROMPT` |
-| 邮件文案模板 | 各脚本里的 `EMAIL_TEMPLATE` 变量 |
+| 评分规则、语言对目标价/上限价 | 飞书「评分规则配置」表 |
+| 候选人信息、评分字段、合同信息 | 对应 Lark 多维表格 |
+| 合同模板 | 飞书合同模板表 |
 
-改完直接对 OpenClaw 说「重跑评分」或「重新解析简历」生效，不需要重装 skill。
+Prompt、邮件模板、核心脚本、前端/API 和 workflow 路由不属于 VM 日常调整范围。发现这些地方需要改时，请标记 Badcase 或联系项目维护者。
 
 ---
 

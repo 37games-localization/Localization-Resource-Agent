@@ -26,6 +26,17 @@ cd ~/.agents/skills/loc-resume-screening
 python3 scripts/check_config.py
 ```
 
+安装保护指令（配置验证通过后执行一次）：
+```bash
+cd ~/.agents/skills/loc-resume-screening
+python3 scripts/lock_user_install.py
+```
+
+说明：
+- 该脚本会把核心脚本、前端源码/配置、引用文档和规则模板设为只读，并禁用当前 checkout 的 `git push`。
+- 它不会锁定 `config.local.yaml`、`config.yaml`、`config/lark-field-mapping.yaml`，不影响 VM 配置和 Lark 表映射。
+- 如果 VM 需要修改核心流程，不要解锁；请标记 Badcase 或联系项目维护者。
+
 配置与密钥隔离规则见 [`references/config-secrets-policy.md`](references/config-secrets-policy.md)。真实 token、邮箱密码、LLM key 只允许写入 `config.local.yaml` 或环境变量，不能提交或打包。
 
 生产表接入/迁移校验（VM 更换 Lark 表，或说「帮我检查这张资源管理表能不能用」时执行）：
@@ -61,6 +72,7 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `push_badcase_issues.py` | 项目侧读取脱敏 snapshot，按统一模板创建 GitHub issue | 项目负责人集中开 issue |
 | `schema_validator.py` | 生产表准入校验：表头识别、缺列/多列/类型差异、生成字段映射 | 「检查这张Lark表能不能用」「更换生产表」 |
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
+| `lock_user_install.py` | 锁定用户安装：核心文件只读，禁用误 push | 初始化配置完成后 |
 | `verify_pricing_rule_coverage.py` | 读取 Lark 评分规则表，检查 22 个主流市场语言对是否齐全 | 「检查评分规则语种覆盖」 |
 
 所有脚本优先从 skill 根目录下的 `config.local.yaml` 读取本机配置；未生成时才读取模板 `config.yaml`。
@@ -91,6 +103,7 @@ python3 scripts/start_frontend.py
 - 运行 `schema_validator.py` 检查或补齐允许自动创建的 Lark 辅助字段。
 - 调整 Lark 里的候选人数据、评分规则、合同信息、合同模板记录。
 - 标记 Badcase、填写期望结果、导出脱敏快照。
+- 运行 `lock_user_install.py` 锁定安装目录。
 
 不允许 VM 日常直接执行的变更：
 - 修改 `scripts/` 下的核心业务脚本、评分引擎、workflow 路由。
@@ -257,7 +270,7 @@ Badcase 回流必须遵守统一协议：
 - VM 侧只上传 `snapshot_version=2.0` 的脱敏 JSON。
 - 项目侧只允许从 snapshot 生成 issue，不允许不同 Agent 自由拼标题和正文。
 - issue 标题、正文、label 由 `scripts/badcase_protocol.py` 统一生成。
-- snapshot 校验失败或安全扫描命中时必须跳过，不允许强行上传/开 issue。
+- snapshot 校验失败时必须跳过，不允许强行上传/开 issue。
 - 禁止包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。
 
 ## 手动纠正评分
@@ -268,15 +281,17 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 3. 不需要重新解析 PDF，不消耗 LLM token
 
 
-## 单点优化入口
-| 想改什么 | 文件 |
+## 单点调整入口
+
+| 想改什么 | VM 应该怎么做 |
 |---------|------|
-| 价格规则（各语言对目标价/上限价） | 飞书「评分规则配置」表（生产唯一来源） |
-| 评分结构规则（字数阈值/档位/有效简历判定） | `config/resume_screening_rules_v2.json` |
-| LLM 解析 prompt | `scripts/parse_resumes.py` 第 49 行 |
-| 邮件文案 | 各脚本里的 `EMAIL_TEMPLATE` |
-| 所有环境配置 | `config.local.yaml`（本机唯一入口，由 `config.example.yaml` 复制生成） |
-| **合同变量↔收集表字段映射** | `scripts/field_mapping.py`（唯一入口） |
+| 价格规则（各语言对目标价/上限价） | 修改飞书「评分规则配置」表 |
+| 候选人解析字段、评分输入字段 | 修改候选人所在 Lark 行，然后重跑评分 |
+| 合同信息、银行信息、证件信息 | 修改合同信息收集表对应行 |
+| 合同模板 | 在飞书合同模板表维护模板记录 |
+| 本机环境配置 | 修改 `config.local.yaml` |
+| 表头变化 / 换表 | 让 Agent 运行 `schema_validator.py` 重新检查并生成字段映射 |
+| prompt、邮件文案、评分引擎、核心脚本、前端/API | 不允许 VM 日常直接修改；请标记 Badcase 或联系项目维护者 |
 
 ---
 
@@ -304,7 +319,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 
 ### 2️⃣ 简历筛选标准（按项目/季度评估）
 
-**文件**：`config/resume_screening_rules_v2.json` → `job_requirements`
+简历筛选标准由当前 Agent 版本内置。VM 日常不要直接修改本地规则文件；如果项目招聘标准变化，请标记 Badcase 或联系项目维护者调整版本。
 
 | 配置项 | 当前值 | 含义 |
 |---|---|---|
@@ -313,20 +328,20 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 | `min_word_count` | 50万字 | 游戏翻译实际字数最低要求 |
 | `preferred_word_count` | 100万字 | 优先录取字数 |
 
-**什么时候需要更新**：招聘标准调整时（如某个项目要求更高/更低的资历）。
+**什么时候需要反馈**：招聘标准调整时（如某个项目要求更高/更低的资历）。
 
 ---
 
 ### 3️⃣ 价格硬校验边界（按需更新）
 
-**文件**：`config/resume_screening_rules_v2.json` → `basic_validation`
+价格硬校验边界由当前 Agent 版本内置。VM 日常不要直接修改本地规则文件；如果购买策略变化，请标记 Badcase 或联系项目维护者调整版本。
 
 | 配置项 | 当前值 | 含义 |
 |---|---|---|
 | `min_price` | 0.01 | 报价下限（低于此直接识别为异常） |
 | `hard_limit` | 0.1 | 报价上限（超过此拒绝，不进入评分） |
 
-**什么时候需要更新**：当公司购买策略调整时。
+**什么时候需要反馈**：当公司购买策略调整时。
 
 ---
 
@@ -342,11 +357,9 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 
 ### 5️⃣ 收集表字段映射（有调整时更新）
 
-**文件**：`scripts/field_mapping.py`
+合同信息收集表的字段 ID 映射到合同变量。若收集表字段有删除、改名或迁移，VM 不要手动改脚本；请让 Agent 运行表结构校验，并在确认后重新生成字段映射。
 
-合同信息收集表的字段 ID 映射到合同变量。**若收集表字段有剂除/迁移，必须同步更新此文件**，否则合同生成会失败。
-
-**什么时候需要更新**：经常不需要手动改，让 Agent 帮你改（参見上方变更 SOP）。
+**什么时候需要更新**：经常不需要手动改。表结构变化时，让 Agent 先检查差异，再由 VM 确认是否生成新映射。
 
 ---
 
@@ -354,11 +367,11 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 
 | 维护内容 | 频率 | 谁来改 |
 |---|---|---|
-| 价格规则 | 市场调整时（不定期） | VM 告诉 Agent 改 |
-| 简历筛选标准 | 项目调整时 | VM 告诉 Agent 改 |
-| 价格硬校验边界 | 购买策略调整时 | VM 告诉 Agent 改 |
+| 价格规则 | 市场调整时（不定期） | VM 在飞书规则表调整 |
+| 简历筛选标准 | 项目调整时 | VM 标记 Badcase / 联系维护者 |
+| 价格硬校验边界 | 购买策略调整时 | VM 标记 Badcase / 联系维护者 |
 | 合同模板表 | 有新合同/升版时 | VM 在飞书上传，告诉 Agent |
-| 收集表字段映射 | 表格调整时 | Agent 帮 VM 改（需确认） |
+| 收集表字段映射 | 表格调整时 | Agent 跑校验并生成映射（需确认） |
 | 飞书表格迁移 | 有必要时 | 必须告诉 Agent，走变更 SOP |
 
 ---
@@ -390,11 +403,11 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
    操作：[删除/改名/迁移] [资源] 的 [字段名]
    风险等级：HIGH / MEDIUM / LOW
    受影响模块：
-     · scripts/field_mapping.py（需同步更新 field_id）
+     · config/lark-field-mapping.yaml（需重新生成字段映射）
      · scripts/generate_contract.py（依赖此字段取值）
    执行顺序：
      1. [飞书操作]
-     2. [同步更新 field_mapping.py 对应行]
+     2. [重新运行 schema_validator.py 生成字段映射]
      3. [dry-run 验证]
    是否继续？请 VM 确认后执行。
 
@@ -402,7 +415,7 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
 ```
 
 **风险等级定义：**
-- `HIGH`：字段被删除 / field_id 变更 / 表迁移 → 脚本直接报错，必须同步更新 `field_mapping.py`
+- `HIGH`：字段被删除 / field_id 变更 / 表迁移 → 脚本直接报错，必须重新生成字段映射
 - `MEDIUM`：字段改名（field_id 不变）/ 选项值改名 → 脚本不受影响，但注释需更新
 - `LOW`：新增字段 / 新增选项 / 调整顺序 → 脚本不受影响
 
@@ -561,7 +574,7 @@ AI 回复：✅ 已写入飞书，李全鸿档位 S，优先录用。
 
 ### v2.3（2026-06-05）
 - ✨ 新增 badcase 回流能力：飞书主表加「是否Badcase」+「期望结果」两个字段
-- ✨ 新增 `export_badcase_snapshots.py`：脱敏快照导出 + git push + GitHub issue 自动创建
+- ✨ 新增 `export_badcase_snapshots.py`：脱敏快照导出并上传到飞书
 - ✨ 本机配置新增 `badcase_export` 和 `github` 配置块
 - 📝 onboarding 增加 badcase 使用说明
 
