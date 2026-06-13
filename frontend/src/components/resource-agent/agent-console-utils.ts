@@ -14,6 +14,7 @@ export const eventLabel: Record<AgentRunEvent["event_type"], string> = {
   vm_decision: "人工决策",
   lark_writeback: "Lark 写回",
   workflow_log_written: "日志写入",
+  usage_report: "成本统计",
   step_done: "步骤完成",
   step_failed: "步骤失败",
   run_done: "执行结束",

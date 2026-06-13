@@ -46,6 +46,10 @@ llm:
   base_url: "https://ai-proxy.37wan.com/anthropic"
   api_key: ""                    # 必须显式配置，或设置 LOC_LLM_API_KEY
   model: "claude-sonnet-4-5-20250929"
+  # 可选：用于前端估算 AI 成本；不填则只显示 token，不显示金额。
+  input_cost_per_1m_usd: ""
+  output_cost_per_1m_usd: ""
+  cny_per_usd: 7.2
 
 test_mode:
   enabled: true                  # 上线前保持 true，邮件发到 test_email

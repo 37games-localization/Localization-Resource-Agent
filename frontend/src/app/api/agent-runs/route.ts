@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { createEventFactory, planAgentRun, type AgentRunEvent, type AgentRunRequest } from "@/lib/agent-runner";
+import { readConfigNestedValue } from "@/lib/lark-data-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,104 @@ function redactSensitiveText(text: string) {
     .replace(/\b\d{6}(?:19|20)\d{2}\d{2}\d{2}\d{3}[\dXx]\b/g, "[证件号已脱敏]")
     .replace(/\b(?:\d[ -]?){12,22}\b/g, "[银行账号已脱敏]")
     .replace(/(乙方地址\s*→\s*).+/g, "$1[个人地址已脱敏]");
+}
+
+function numberFromConfig(section: string, key: string) {
+  const raw = readConfigNestedValue(section, key);
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function configuredLlmInfo() {
+  return {
+    provider: readConfigNestedValue("llm", "provider") || "unknown",
+    model: readConfigNestedValue("llm", "model") || "unknown",
+    inputUsdPerMillion:
+      numberFromConfig("llm", "input_cost_per_1m_usd") ??
+      numberFromConfig("llm", "input_cost_usd_per_1m"),
+    outputUsdPerMillion:
+      numberFromConfig("llm", "output_cost_per_1m_usd") ??
+      numberFromConfig("llm", "output_cost_usd_per_1m"),
+    cnyPerUsd: numberFromConfig("llm", "cny_per_usd") ?? 7.2
+  };
+}
+
+function estimateTokensFromChars(chars: number) {
+  if (!Number.isFinite(chars) || chars <= 0) return 0;
+  return Math.ceil(chars / 2.2);
+}
+
+function parseUsageFromOutput(outputText: string) {
+  const promptTokens =
+    outputText.match(/["']prompt_tokens["']\s*:\s*(\d+)/)?.[1] ??
+    outputText.match(/["']input_tokens["']\s*:\s*(\d+)/)?.[1] ??
+    outputText.match(/\binput_tokens\s*[=:]\s*(\d+)/i)?.[1];
+  const completionTokens =
+    outputText.match(/["']completion_tokens["']\s*:\s*(\d+)/)?.[1] ??
+    outputText.match(/["']output_tokens["']\s*:\s*(\d+)/)?.[1] ??
+    outputText.match(/\boutput_tokens\s*[=:]\s*(\d+)/i)?.[1];
+  if (!promptTokens && !completionTokens) return undefined;
+  return {
+    inputTokens: Number(promptTokens ?? 0),
+    outputTokens: Number(completionTokens ?? 0)
+  };
+}
+
+function estimateAiUsage({
+  action,
+  outputText,
+  message,
+  runId,
+  candidateName,
+  candidateRecordId
+}: {
+  action: string;
+  outputText: string;
+  message: string;
+  runId: string;
+  candidateName?: string;
+  candidateRecordId?: string;
+}) {
+  const llm = configuredLlmInfo();
+  const apiUsage = parseUsageFromOutput(outputText);
+  const hasLlmSignal =
+    action === "score" ||
+    /LLM|OpenAI-compatible|DeepSeek|Claude|GPT|解析简历|PDF\s+\d+\s+字符/i.test(outputText);
+  const parsedPdfChars = Number(outputText.match(/PDF\s+(\d+)\s+字符/)?.[1] ?? outputText.match(/PDF 解析成功（(\d+)字符）/)?.[1]);
+  const estimatedInputChars = Number.isFinite(parsedPdfChars)
+    ? Math.min(parsedPdfChars, 8000) + 1200
+    : message.length + 1200;
+  const estimatedOutputChars = Math.min(outputText.length, 4000);
+  const inputTokens = apiUsage?.inputTokens ?? (hasLlmSignal ? estimateTokensFromChars(estimatedInputChars) : 0);
+  const outputTokens = apiUsage?.outputTokens ?? (hasLlmSignal ? estimateTokensFromChars(estimatedOutputChars) : 0);
+  const totalTokens = inputTokens + outputTokens;
+  const canPrice = llm.inputUsdPerMillion !== undefined && llm.outputUsdPerMillion !== undefined;
+  const costUsd = canPrice
+    ? (inputTokens / 1_000_000) * llm.inputUsdPerMillion! + (outputTokens / 1_000_000) * llm.outputUsdPerMillion!
+    : undefined;
+
+  return {
+    run_id: runId,
+    candidate_name: candidateName,
+    candidate_record_id: candidateRecordId,
+    action,
+    provider: llm.provider,
+    model: llm.model,
+    usage_source: apiUsage ? "api_returned" : hasLlmSignal ? "estimated" : "not_applicable",
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+    cost_usd: costUsd === undefined ? null : Number(costUsd.toFixed(6)),
+    cost_cny: costUsd === undefined ? null : Number((costUsd * llm.cnyPerUsd).toFixed(4)),
+    input_cost_per_1m_usd: llm.inputUsdPerMillion ?? null,
+    output_cost_per_1m_usd: llm.outputUsdPerMillion ?? null,
+    pricing_status: canPrice ? "priced" : hasLlmSignal ? "missing_unit_price" : "not_applicable",
+    note: canPrice
+      ? "成本按 config.local.yaml 中 llm 单价估算。"
+      : hasLlmSignal
+        ? "已统计 token；未配置 llm.input_cost_per_1m_usd / output_cost_per_1m_usd，因此不估算金额。"
+        : "本步骤未检测到 LLM 调用信号，AI token 记为 0。"
+  };
 }
 
 type BusinessResult =
@@ -391,6 +490,20 @@ export async function POST(request: NextRequest) {
       child.on("close", (code) => {
         const outputText = outputChunks.join("");
         const businessResult = analyzeBusinessResult(outputText);
+        send(
+          event(
+            "usage_report",
+            estimateAiUsage({
+              action: plan.action,
+              outputText,
+              message: body.message,
+              runId,
+              candidateName: plan.candidateName,
+              candidateRecordId: plan.candidateRecordId
+            }),
+            plan.action
+          )
+        );
         if (code === 0 && businessResult.status === "success") {
           send(
             event(

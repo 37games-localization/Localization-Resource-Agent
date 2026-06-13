@@ -115,6 +115,18 @@ function formatNumberText(value: string, suffix = "") {
   return `${num.toLocaleString("en-US")}${suffix}`;
 }
 
+function formatUsageNumber(value: unknown) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "0";
+  return num.toLocaleString("en-US");
+}
+
+function formatCurrency(value: unknown, prefix: string) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "未配置";
+  return `${prefix}${num.toLocaleString("en-US", { maximumFractionDigits: prefix === "$" ? 6 : 4 })}`;
+}
+
 function scoreToConfidence(score: string) {
   const num = Number(score);
   if (!Number.isFinite(num)) return 62;
@@ -220,6 +232,8 @@ export default function AgentVisualPage() {
   const alertCount = candidates.filter((candidate) => candidate.status === "alert").length;
   const doneCount = candidates.filter((candidate) => candidate.status === "done").length;
   const latestRunCheckpoint = [...runEvents].reverse().find((event) => event.event_type === "checkpoint");
+  const latestUsageReport = [...runEvents].reverse().find((event) => event.event_type === "usage_report");
+  const latestUsage = latestUsageReport?.payload;
   const latestCheckpointSummary = latestRunCheckpoint?.payload.summary as Record<string, unknown> | undefined;
   const latestRunStarted = runEvents.find((event) => event.event_type === "run_started");
   const latestStepInput = [...runEvents].reverse().find((event) => event.event_type === "step_input");
@@ -274,6 +288,14 @@ export default function AgentVisualPage() {
           ? "事件流显示本次为 dry-run/未写回"
           : "";
   const canEditReview = canConfirmAdvance && checkpointMode !== "confirmed";
+  const usageTotalTokens = formatUsageNumber(latestUsage?.total_tokens);
+  const usageInputTokens = formatUsageNumber(latestUsage?.input_tokens);
+  const usageOutputTokens = formatUsageNumber(latestUsage?.output_tokens);
+  const usageCostCny = formatCurrency(latestUsage?.cost_cny, "¥");
+  const usageCostUsd = formatCurrency(latestUsage?.cost_usd, "$");
+  const usageSource = typeof latestUsage?.usage_source === "string" ? latestUsage.usage_source : "尚未运行";
+  const usagePricingStatus = typeof latestUsage?.pricing_status === "string" ? latestUsage.pricing_status : "pending";
+  const usageNote = typeof latestUsage?.note === "string" ? latestUsage.note : "运行 Agent 后会展示本次 AI token 和成本口径。";
 
   async function refreshCandidates() {
     const resources = await fetchCandidateResources();
@@ -927,6 +949,38 @@ export default function AgentVisualPage() {
               ["本次运行", latestStepInput ? latestRunWritebackState : "尚未执行"]
             ]}
           />
+          <section className="execution-section">
+            <h3>AI 成本</h3>
+            <div className="token-grid">
+              <div>
+                <span>总 TOKEN</span>
+                <strong>{usageTotalTokens}</strong>
+              </div>
+              <div>
+                <span>估算成本</span>
+                <strong>{usageCostCny}</strong>
+              </div>
+              <div>
+                <span>输入 TOKEN</span>
+                <strong>{usageInputTokens}</strong>
+              </div>
+              <div>
+                <span>输出 TOKEN</span>
+                <strong>{usageOutputTokens}</strong>
+              </div>
+            </div>
+            <div className="token-bar">
+              <span
+                style={{
+                  width: `${Math.min(100, Math.max(4, Number(latestUsage?.total_tokens ?? 0) / 80))}%`
+                }}
+              />
+            </div>
+            <p className="usage-note">
+              {usageSource} · {usagePricingStatus} · {usageCostUsd}
+            </p>
+            <p className="usage-note">{usageNote}</p>
+          </section>
           <MetricGroup title="当前记录" items={[["record_id", selected.recordId], ["供应商编号", selected.id], ["Lark状态节点", selected.currentNode], ["风险提示", selected.risk]]} />
           <MetricGroup title="最近写回字段" items={[["rating", selected.rating], ["score", selected.score], ["aiSuggestion", selected.aiSuggestion], ["confidence", `${selected.confidence}%`]]} />
           <section className="execution-section">

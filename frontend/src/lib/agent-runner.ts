@@ -38,6 +38,7 @@ export type AgentRunEvent = {
     | "vm_decision"
     | "lark_writeback"
     | "workflow_log_written"
+    | "usage_report"
     | "step_done"
     | "step_failed"
     | "run_done"
