@@ -14,23 +14,11 @@ description: "本地化资源管理全流程 skill，覆盖译者简历筛选到
 - **LLM Key 显式配置**：解析简历前必须配置 `llm.api_key` 或 `LOC_LLM_API_KEY`，不自动读取 OpenClaw 额度
 - **两阶段评分**：LLM 解析（一次性）→ 规则评分（可反复，确定性）
 - **TEST_MODE 保护**：正式启用前所有邮件发到测试邮箱
+- **日常使用不改核心流程**：VM 的日常指令只允许配置、运行、查看、写回、标记 Badcase 和调整 Lark 数据/规则；不得直接修改核心脚本、评分引擎、workflow 路由、前端/API 或仓库结构
 
 ## 配置与安装
 
 VM 首次使用时，先读引导文档：[`references/onboarding.md`](references/onboarding.md)
-
-### 文档阅读路由
-
-不要在普通 VM 安装或日常操作时主动通读全仓库。按场景读取最小必要文档：
-
-| 场景 | 读取文档 |
-|---|---|
-| VM 首次安装 / 初始化配置 | `SKILL.md`、`references/onboarding.md`、`config.example.yaml` |
-| 日常操作：看简历、发测试题、准备合同、核查签字、状态推进、Badcase | `SKILL.md`；需要字段含义时再读 `references/lark-field-dictionary.md` |
-| 配置排错 / Lark 表迁移 / 字段改名 | `references/config.md`、`references/config-secrets-policy.md`、`references/lark-field-dictionary.md` |
-| 飞书表、合同模板、字段依赖变更 | `references/lark-dependencies.yaml`、`scripts/field_mapping.py` |
-
-本仓库面向 VM 和外部使用者，只保留资源管理 Agent 的安装、配置和业务 workflow 说明。
 
 配置验证指令（VM 说「帮我验证资源管理配置」时执行）：
 ```bash
@@ -92,8 +80,24 @@ python3 scripts/start_frontend.py
 - 这是同一个真实工作台。
 - `DRY-RUN` / `TEST MODE` / `PRODUCTION` 由页面运行模式和后端脚本共同决定。
 - 页面读取 `config.local.yaml`、`config/lark-field-mapping.yaml`、Lark 候选人表和 `workflow_log`。
-- 页面里的 trace 是业务执行过程展示，用于让 VM 看清候选人定位、Lark 读取、脚本执行、输出摘要、失败原因和人工确认节点；它不是开发维护用的 trace/span 治理体系。
 - dry-run 不允许被前端伪装成已写回；只有 production 简历评估 checkpoint 才允许确认/修改写回。
+
+### 操作边界
+
+当 VM 要求“改逻辑”“改脚本”“改评分引擎”“改工作流”“改前端/API”“直接修代码”时，不要直接修改仓库文件。应先把问题标记为 Badcase 或生成问题说明，交由项目维护者处理。
+
+允许 VM 日常执行的变更：
+- 修改 `config.local.yaml` 中的本机配置。
+- 运行 `schema_validator.py` 检查或补齐允许自动创建的 Lark 辅助字段。
+- 调整 Lark 里的候选人数据、评分规则、合同信息、合同模板记录。
+- 标记 Badcase、填写期望结果、导出脱敏快照。
+
+不允许 VM 日常直接执行的变更：
+- 修改 `scripts/` 下的核心业务脚本、评分引擎、workflow 路由。
+- 修改 `frontend/`、API、仓库结构或依赖版本。
+- 执行 `git commit`、`git push`、删除文件、重写历史。
+
+如果确实需要改核心流程，先停止当前业务操作，并提示 VM 联系项目维护者。
 
 ### 生产运行门禁
 

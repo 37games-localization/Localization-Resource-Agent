@@ -81,21 +81,6 @@ Agent 会逐步引导 VM 完成：
 
 详细引导见 [`references/onboarding.md`](references/onboarding.md)
 
-## 文档怎么读
-
-VM 日常使用不需要读完整仓库。安装和操作默认只看短入口：
-
-| 场景 | 读取入口 |
-|---|---|
-| 安装和首次配置 | `README.md`、`SKILL.md`、`references/onboarding.md` |
-| 日常自然语言使用 | `SKILL.md` |
-| 配置排错 / 换 Lark 表 | `references/config.md`、`references/lark-field-dictionary.md`、`references/config-secrets-policy.md` |
-| 飞书表或合同字段变更 | `references/lark-dependencies.yaml`、`references/lark-field-dictionary.md` |
-
-本仓库面向 VM 和外部使用者，只保留资源管理 Agent 的安装、配置和业务 workflow 说明。
-
----
-
 ## 前端工作台
 
 VM 安装并完成配置后，可以直接对 Agent 说：
@@ -111,8 +96,6 @@ http://127.0.0.1:3000/agent-visual
 ```
 
 这个前端读取 VM 本机 `config.local.yaml` 和字段映射，直接连接 Lark 候选人表、流程日志表和现有业务脚本。同一个页面支持 `DRY-RUN`、`TEST MODE` 和 `PRODUCTION`，页面会显示本次真实执行模式、是否写回、是否发送、是否需要人工确认。
-
-页面里的 trace 指的是**业务执行过程展示**：候选人定位、Lark 读取、脚本执行、输出摘要、失败原因和人工确认节点。它用于让 VM 看清 Agent 做了什么，不等同于开发维护用的 trace/span 治理体系。
 
 手动启动命令：
 
@@ -130,8 +113,6 @@ python3 scripts/start_frontend.py
 - ✨ 前端支持同一页面切换 `DRY-RUN` / `TEST MODE` / `PRODUCTION`。
 - 🛡️ 保留 dry-run / 未写回 / 未发送语义：前端不会把预览结果伪装成真实写回。
 - 🛡️ 简历评估 checkpoint 增加写回边界：只有 production 简历评估 checkpoint 可确认/修改；测试题、合同、签字核查不能误走简历确认接口。
-- 📝 README、SKILL 和 onboarding 已补充前端启动说明。
-- ✅ 验证：前端 `npm run check`、`npx tsc --noEmit` 通过；启动脚本实测可打开 `/agent-visual`；评分引擎测试 25/25 通过。
 
 ### v2.6（2026-06-12）
 **稳定唤起 Router**
@@ -140,7 +121,6 @@ python3 scripts/start_frontend.py
 - ✨ 新增 `agent_router.py`：识别自然语言中的 step、候选人、record_id、附件、目标状态和 Badcase 期望结果；缺信息时停止并提示，不猜测执行。
 - ✨ 明确 runtime / workflow 边界：Router 负责入口识别，workflow/runtime 负责过程可见、checkpoint、日志与回放，核心业务仍由已验收单点脚本执行。
 - 🛡️ 更新 README 的 Agent 架构与使用边界，说明系统如何稳定唤起、执行、确认和回流问题。
-- ✅ 验证：稳定唤起、短期 session 承接、缺信息阻断通过。
 
 ### v2.5（2026-06-12）
 **评分规则配置 + 全语种覆盖**
@@ -150,7 +130,6 @@ python3 scripts/start_frontend.py
 - 🐛 修复中英混写语言对匹配：例如「简中>韩语 Simplified Chinese to Korean」可稳定归一化为 `zh-CN>ko`，并命中 Lark 评分规则。
 - ✨ 新增 `verify_pricing_rule_coverage.py`：直接读取 Lark「评分规则配置」表，检查主流市场语言对是否齐全，输出 missing / extra / available。
 - 🐛 修复 schema 校验的手动映射优先级：已确认的 `candidate.score -> Agent总分` 不再被同名公式字段「总分」误判为类型错误。
-- ✅ 验证：Lark 实表规则覆盖 22/22，missing 0，extra 0；评分引擎测试 25/25；schema 全量准入 PASS。
 
 ### v2.4（2026-06-11）
 **生产端验证修复 + 工作流可视化稳定版**
@@ -165,7 +144,6 @@ python3 scripts/start_frontend.py
 - 🐛 修复合同模板推荐：按账户类型、账户地区、收款币种联合打分；覆盖国内/海外 × 人民币/外币四象限规则。
 - 🐛 修复合同 docx 自动打开体验：优先 WPS，失败时输出明确文件路径。
 - 🐛 修复生产评分规则来源：价格维度必须读取 Lark「评分规则配置」表；缺表、缺字段、缺语言对时阻断评分，不再静默使用包内旧规则。
-- ✅ 验证：生产 issue / Badcase 协议检查通过，评分引擎测试 25/25，全脚本语法检查通过。
 
 ### v2.3（2026-06-05）
 **Badcase 回流上线**
