@@ -89,6 +89,18 @@ export function readConfigValue(key: string) {
   return match?.[1]?.trim() ?? "";
 }
 
+export function readConfigNestedValue(section: string, key: string) {
+  const configPath = getSkillConfigPath();
+  if (!existsSync(configPath)) return "";
+  const text = readFileSync(configPath, "utf8");
+  const escapedSection = section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const blockMatch = text.match(new RegExp(`^${escapedSection}:\\s*\\n([\\s\\S]*?)(?=^[a-zA-Z0-9_]+:\\s*$|\\Z)`, "m"));
+  const block = blockMatch?.[1] ?? "";
+  const match = block.match(new RegExp(`^\\s+${escapedKey}:\\s*['"]?([^'"\\n#]+)['"]?`, "m"));
+  return match?.[1]?.trim() ?? "";
+}
+
 function readMappedTableConfig(tableKey: string) {
   const mappingPath = `${getSkillRoot()}/config/lark-field-mapping.yaml`;
   if (!existsSync(mappingPath)) return { baseToken: "", tableId: "" };
@@ -126,8 +138,15 @@ export function larkTableConfig(table: LarkTableKey) {
   }
   const mapped = readMappedTableConfig("pricing_rules");
   return {
-    baseToken: readConfigValue("rules_base_token") || mapped.baseToken || readConfigValue("base_token"),
-    tableId: readConfigValue("rules_table_id") || mapped.tableId
+    baseToken:
+      readConfigNestedValue("pricing_rules", "base_token") ||
+      readConfigValue("rules_base_token") ||
+      mapped.baseToken ||
+      readConfigValue("base_token"),
+    tableId:
+      readConfigNestedValue("pricing_rules", "table_id") ||
+      readConfigValue("rules_table_id") ||
+      mapped.tableId
   };
 }
 

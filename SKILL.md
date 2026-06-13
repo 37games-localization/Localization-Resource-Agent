@@ -29,9 +29,8 @@ VM 首次使用时，先读引导文档：[`references/onboarding.md`](reference
 | 日常操作：看简历、发测试题、准备合同、核查签字、状态推进、Badcase | `SKILL.md`；需要字段含义时再读 `references/lark-field-dictionary.md` |
 | 配置排错 / Lark 表迁移 / 字段改名 | `references/config.md`、`references/config-secrets-policy.md`、`references/lark-field-dictionary.md` |
 | 飞书表、合同模板、字段依赖变更 | `references/lark-dependencies.yaml`、`scripts/field_mapping.py` |
-| 开发接手 / 架构排查 / 发版治理 / 回归审计 | `HANDOVER.md`、`V2-PROJECT.md`、eval / trace / regression 相关文档 |
 
-`HANDOVER.md` 和 `V2-PROJECT.md` 是工程维护文档。除非用户明确说「接手开发」「排查架构」「做工程治理」「准备发版」或类似诉求，否则不要在 VM 安装和日常使用时主动读取或总结它们。
+本仓库面向 VM 和外部使用者，只保留资源管理 Agent 的安装、配置和业务 workflow 说明。
 
 配置验证指令（VM 说「帮我验证资源管理配置」时执行）：
 ```bash
@@ -74,13 +73,6 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `push_badcase_issues.py` | 项目侧读取脱敏 snapshot，按统一模板创建 GitHub issue | 项目负责人集中开 issue |
 | `schema_validator.py` | 生产表准入校验：表头识别、缺列/多列/类型差异、生成字段映射 | 「检查这张Lark表能不能用」「更换生产表」 |
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
-| `run_testmode_demo.py` | 真实 TEST_MODE demo 证据采集：调用现有脚本并保存 transcript/summary | 「跑一遍真实测试demo」「录制前验证」 |
-| `run_fixture_demo.py` | 最终演示虚拟测试集矩阵：脱敏候选人、多分支 checkpoint、trace/span 证据 | 「跑一遍演示测试集」「检查最终demo素材」 |
-| `seed_demo_contract_info.py` | 将脱敏 demo 候选人的合同信息写入当前 Lark 合同信息表，供工作台和合同节点演示 | 「补齐演示合同信息」「初始化 demo 合同表」 |
-| `integration_readiness.py` | v2 分步骤集成验收：只读检查原脚本、v2包装、schema映射，不执行业务动作 | 「检查v2现在能不能进入生产验证」「做一轮集成验收」 |
-| `eval_runner.py` | Agent 治理 eval：统一运行回归、规则覆盖、集成验收、隐私扫描并输出 JSON/Markdown 证据 | 「跑一轮 Agent 治理 eval」 |
-| `replay_run.py` | Agent 运行回放：按 run_id 或 eval_report 重建 trace/span 时间线 | 「回放这次 Agent 运行」「按 run_id 看执行过程」 |
-| `regression_report.py` | 变更后回归报告：区分主流程影响、旁路观测、准入/QA、文档改动 | 「改完后影响哪些主流程」「出一份回归报告」 |
 | `verify_pricing_rule_coverage.py` | 读取 Lark 评分规则表，检查 22 个主流市场语言对是否齐全 | 「检查评分规则语种覆盖」 |
 
 所有脚本优先从 skill 根目录下的 `config.local.yaml` 读取本机配置；未生成时才读取模板 `config.yaml`。
@@ -97,14 +89,15 @@ python3 scripts/start_frontend.py
 启动后把访问地址告诉 VM，默认是 `http://127.0.0.1:3000/agent-visual`。
 
 说明：
-- 这是同一个真实工作台，不区分 demo 前端和生产前端。
+- 这是同一个真实工作台。
 - `DRY-RUN` / `TEST MODE` / `PRODUCTION` 由页面运行模式和后端脚本共同决定。
 - 页面读取 `config.local.yaml`、`config/lark-field-mapping.yaml`、Lark 候选人表和 `workflow_log`。
+- 页面里的 trace 是业务执行过程展示，用于让 VM 看清候选人定位、Lark 读取、脚本执行、输出摘要、失败原因和人工确认节点；它不是开发维护用的 trace/span 治理体系。
 - dry-run 不允许被前端伪装成已写回；只有 production 简历评估 checkpoint 才允许确认/修改写回。
 
 ### 生产运行门禁
 
-`test_mode.enabled=true` 时，业务脚本不强制阻断，方便 TEST_MODE demo 和单步验证。
+`test_mode.enabled=true` 时，业务脚本不强制阻断，方便 TEST_MODE 和单步验证。
 
 切正式环境后（`test_mode.enabled=false`），`run_dialog.py` 和 `workflow_runner.py` 会先调用 `schema_gate.py`。如果 `config/lark-field-mapping.yaml` 缺少候选人表、流程日志表或合同表的必需字段映射，会直接停止执行，并提示 VM 先跑：
 
@@ -119,110 +112,11 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 LOC_REQUIRE_SCHEMA_READY=1 python3 scripts/run_dialog.py waiting
 ```
 
-### 真实 TEST_MODE Demo 证据采集
-
-录制 demo 前，使用真实 Lark 测试记录和本人测试邮箱跑一遍。脚本不会伪造终端输出，会调用现有业务脚本并保存证据：
-
-```bash
-python3 scripts/run_testmode_demo.py \
-  --score-record-id recXXXX --score-decision 写入 \
-  --test-email-record-id recXXXX --test-file ~/Downloads/test.pdf \
-  --contract-record-id recYYYY --contract-dry-run
-```
-
-输出目录默认在 `~/.loc-resume-demo-runs/YYYYMMDD-HHMMSS/`，包含：
-- `summary.md`：录屏前快速确认每步 PASS/FAIL
-- `transcript.jsonl`：每步命令、返回码、JSON、stdout/stderr
-- `*.stdout.txt` / `*.stderr.txt`：逐步终端证据
-
-默认要求 `test_mode.enabled=true`；正式生产模式下会拒绝运行，除非显式加 `--allow-production`。
-
-### 分步骤集成验收
-
-v2 的推进原则是：原脚本继续作为已验收业务底座，v2 包装层只增加可视化、checkpoint、流程日志和对话输出。进入 VM 生产验证前，先跑只读检查：
-
-```bash
-python3 scripts/integration_readiness.py
-```
-
-详细计划见 [`references/integration-validation-plan.md`](references/integration-validation-plan.md)。
-
-字段说明见 [`references/lark-field-dictionary.md`](references/lark-field-dictionary.md)。这份文档用于生产表迁移：即使 VM 修改表头，也能知道 `candidate.score`、`workflow.output_summary`、`contract.bank_account_number` 等内部 key 分别存什么信息。
-
-当前建议：先验收 `score` / `test-email` / `contract` 三个手动子命令；`workflow_runner.py next` 暂不作为唯一主入口，等单步骤包装稳定后再启用。
-
-### Agent 治理 Eval
-
-开发改动后可运行统一 eval 入口：
-
-```bash
-python3 scripts/eval_runner.py
-```
-
-输出目录默认在 `~/.loc-resume-eval-runs/YYYYMMDD-HHMMSS/`，包含：
-- `eval_report.json`：机器可读结果，含 `run_id`、case 结果、脱敏 trace/span。
-- `summary.md`：人类可读摘要。
-- `*.stdout.txt` / `*.stderr.txt`：各检查命令证据。
-
-Eval runner 只做准入/QA，不写 Lark、不发邮件、不生成真实合同、不推进状态。`pass` 表示检查通过；`changed` 表示检查命令通过但存在需要关注的变更影响面；`fail` 表示不能宣称本轮稳定。
-
-### 最终 Demo Fixture 矩阵
-
-对外演示和 6/15 最终录制使用脱敏虚拟测试集，不直接使用生产简历、合同或收款信息：
-
-```bash
-python3 scripts/run_fixture_demo.py
-```
-
-输出目录默认在 `~/.loc-resume-demo-fixture-runs/YYYYMMDD-HHMMSS/`，包含：
-- `summary.md`：S/A/B/C、测试邮件、合同、badcase 的演示矩阵摘要。
-- `transcript.txt`：可用于终端录制的自然语言输入与 Agent 输出。
-- `fixture_demo_report.json`：含脱敏 trace/span，可被回放和审计。
-
-Fixture 设计见 [`references/demo-fixture-matrix.md`](references/demo-fixture-matrix.md)。它只验证演示/治理路径，不写 Lark、不发邮件、不生成生产合同、不推进真实状态。
-
-### Trace / Span 回放
-
-需要审计某次 Agent 运行时，使用只读回放入口：
-
-```bash
-# 从 Lark workflow_log 回放指定 run_id
-python3 scripts/replay_run.py --run-id run-xxxx
-
-# 回放最新一轮 workflow_log
-python3 scripts/replay_run.py --latest
-
-# 回放 eval_runner 生成的 eval_report.json
-python3 scripts/replay_run.py --eval-report ~/.loc-resume-eval-runs/<run>/eval_report.json
-```
-
-输出目录默认在 `~/.loc-resume-replays/YYYYMMDD-HHMMSS/`，包含：
-- `replay.json`：标准 trace/span 时间线。
-- `summary.md`：人类可读运行回放。
-
-Replay 只读 Lark 或本地 eval 报告，不写 Lark、不恢复 checkpoint、不重新执行业务动作。
-
 ### 受控手动串联
 
 当前阶段可以进入受控手动串联：VM 明确说候选人和节点，Agent 调用对应单点脚本执行、展示输入输出、写回 Lark，并记录过程。不要默认启用全自动 `next`。
 
-详细 runbook：[`references/manual-chain-runbook.md`](references/manual-chain-runbook.md)
-
-稳定版 QA 清单：[`references/stable-qa-checklist.md`](references/stable-qa-checklist.md)
-
-### 变更后回归报告
-
-每次开发改动后，先跑：
-
-```bash
-python3 scripts/regression_report.py
-```
-
-报告会把改动分为：
-- `影响主流程`：原业务脚本、配置读取、字段映射、合同变量映射；必须跑对应单节点 dry-run/TEST_MODE。
-- `旁路观测`：v2 包装、流程日志、checkpoint、统一入口、demo 采集；必须证明只复用原脚本，不接管业务判断。
-- `准入/QA`：schema、field mapping、门禁、验收脚本；必须跑 schema 校验和集成验收。
-- `文档/交接`：不直接影响脚本，但必须和当前行为一致。
+如果候选人、附件、合同信息或目标状态不明确，必须停下来询问 VM，不允许猜测执行。
 
 ## 招募状态链（16节点）
 
@@ -478,7 +372,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 |------|------|----------|
 | 合同信息收集表 `<contract_table_id>` | 读取乙方姓名/证件/银行信息 → 填入合同变量 | `generate_contract.py` `field_mapping.py` |
 | 合同模板表 `<template_table_id>` | 下载合同模板 docx + 读取所需变量 | `generate_contract.py` |
-| 简历收集表 `<resume_table_id>` | 解析评分数据读写 | `parse_resumes.py` `evaluate_resumes.py` |
+| 简历收集表 `<resume_table_id>` | 解析评分数据读写 | `parse_resumes.py` `rescore_and_write.py` |
 
 ### 变更 SOP（Agent 必须遵守）
 
@@ -643,8 +537,6 @@ AI 回复：✅ 已写入飞书，李全鸿档位 S，优先录用。
 - 字段用途字典：[`references/lark-field-dictionary.md`](references/lark-field-dictionary.md)（表头变更 / 字段含义）
 - 飞书资源依赖：[`references/lark-dependencies.yaml`](references/lark-dependencies.yaml)（飞书表或合同字段变更）
 - 合同变量映射：[`scripts/field_mapping.py`](scripts/field_mapping.py)（合同变量维护）
-- 工程交接：[`HANDOVER.md`](HANDOVER.md)（仅开发接手 / 架构排查 / 发版治理）
-- 项目规划：[`V2-PROJECT.md`](V2-PROJECT.md)（仅开发接手 / 架构排查 / 发版治理）
 
 ---
 

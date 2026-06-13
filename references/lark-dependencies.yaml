@@ -38,7 +38,6 @@ resources:
       - scripts/resume_screening_engine_v2.py
       - scripts/rescore_and_write.py
       - scripts/rescore_and_write_v2.py
-      - scripts/evaluate_resumes.py
     critical_fields:
       - field_id: "<field_id>"
         field_name: "语言对"
@@ -187,7 +186,6 @@ resources:
     used_by:
       - scripts/parse_resumes.py
       - scripts/rescore_and_write.py
-      - scripts/evaluate_resumes.py
     note: "字段众多，关键字段见 references/config.md"
 
   # ── 4. 资源管理主表（入库后的资源商档案） ───────────────────

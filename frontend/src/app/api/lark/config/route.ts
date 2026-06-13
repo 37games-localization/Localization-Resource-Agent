@@ -1,6 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { NextResponse } from "next/server";
-import { getSkillConfigPath, getSkillRoot, larkTableConfig, readConfigValue } from "@/lib/lark-data-access";
+import {
+  getSkillConfigPath,
+  getSkillRoot,
+  larkTableConfig,
+  readConfigNestedValue,
+  readConfigValue
+} from "@/lib/lark-data-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +27,47 @@ const LARK_BASE_HOST = "https://g4wt0dn9mss.sg.larksuite.com/base";
 function tableUrl(baseToken: string, tableId: string) {
   if (!baseToken || !tableId) return "";
   return `${LARK_BASE_HOST}/${baseToken}?table=${tableId}`;
+}
+
+function resolvePricingRulesTable(mapping: Record<string, MappingTable>, candidateBaseToken: string) {
+  const pricingBase = readConfigNestedValue("pricing_rules", "base_token");
+  const pricingTable = readConfigNestedValue("pricing_rules", "table_id");
+  if (pricingBase || pricingTable) {
+    return {
+      baseToken: pricingBase,
+      tableId: pricingTable,
+      source: "pricing_rules.base_token/table_id",
+      sourceNote: "独立评分规则配置表"
+    };
+  }
+
+  const legacyBase = readConfigValue("rules_base_token");
+  const legacyTable = readConfigValue("rules_table_id");
+  if (legacyBase || legacyTable) {
+    return {
+      baseToken: legacyBase || candidateBaseToken,
+      tableId: legacyTable,
+      source: legacyBase ? "lark.rules_base_token/rules_table_id" : "lark.rules_table_id",
+      sourceNote: "兼容旧配置"
+    };
+  }
+
+  const mapped = mapping.pricing_rules;
+  if (mapped?.baseToken || mapped?.tableId) {
+    return {
+      baseToken: mapped.baseToken,
+      tableId: mapped.tableId,
+      source: "config/lark-field-mapping.yaml",
+      sourceNote: "字段映射生成结果"
+    };
+  }
+
+  return {
+    baseToken: candidateBaseToken,
+    tableId: "",
+    source: "fallback",
+    sourceNote: "未配置独立评分规则表；生产评分会被门禁阻断"
+  };
 }
 
 function parseMapping(): Record<string, MappingTable> {
@@ -87,7 +134,7 @@ export async function GET() {
   const candidate = larkTableConfig("candidate");
   const contract = larkTableConfig("contract");
   const workflow = larkTableConfig("workflowLog");
-  const pricingFromMapping = mapping.pricing_rules;
+  const pricingRules = resolvePricingRulesTable(mapping, candidate.baseToken);
   const templateBaseToken = readConfigValue("template_base_token");
   const templateTableId = readConfigValue("template_table_id");
 
@@ -112,9 +159,11 @@ export async function GET() {
       key: "pricing_rules",
       label: "评分规则配置表",
       purpose: "各语种单价区间、评级与评分计算依赖规则",
-      baseToken: pricingFromMapping?.baseToken || candidate.baseToken || "",
-      tableId: pricingFromMapping?.tableId || readConfigValue("rules_table_id"),
-      fields: pricingFromMapping?.fields ?? []
+      baseToken: pricingRules.baseToken,
+      tableId: pricingRules.tableId,
+      source: pricingRules.source,
+      sourceNote: pricingRules.sourceNote,
+      fields: mapping.pricing_rules?.fields ?? []
     },
     {
       key: "workflow_log",

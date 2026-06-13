@@ -25,6 +25,57 @@ function redactSensitiveText(text: string) {
     .replace(/(乙方地址\s*→\s*).+/g, "$1[个人地址已脱敏]");
 }
 
+type BusinessResult =
+  | { status: "success"; reason?: string; error_type?: string }
+  | { status: "failed" | "partial_failed"; reason: string; error_type: string; next: string };
+
+function analyzeBusinessResult(outputText: string): BusinessResult {
+  const normalized = outputText.replace(/\r/g, "");
+
+  const summary =
+    normalized.match(/(?:全部)?完成：成功\s*(\d+)\s*\|\s*跳过\s*(\d+)\s*\|\s*失败\s*(\d+)/) ??
+    normalized.match(/完成：成功\s*(\d+)\s*\|\s*跳过\s*(\d+)\s*\|\s*失败\s*(\d+)/);
+  if (summary) {
+    const ok = Number(summary[1]);
+    const failed = Number(summary[3]);
+    if (failed > 0 && ok === 0) {
+      return {
+        status: "failed",
+        reason: `脚本进程已结束，但业务结果为失败：成功 ${ok}，失败 ${failed}。`,
+        error_type: "business_summary_failed",
+        next: "请先处理上方 tool 输出中的失败原因；系统不会生成成功 checkpoint 或继续推进。"
+      };
+    }
+    if (failed > 0) {
+      return {
+        status: "partial_failed",
+        reason: `脚本进程已结束，但业务结果为部分失败：成功 ${ok}，失败 ${failed}。`,
+        error_type: "business_summary_partial_failed",
+        next: "请复核失败记录；本次不会生成统一成功 checkpoint。"
+      };
+    }
+  }
+
+  const failurePatterns: Array<[RegExp, string]> = [
+    [/LLM\s*返回失败|调用异常.*LLM|OpenAI-compatible LLM HTTP|invalid_api_key|Authentication Fails/i, "llm_call_failed"],
+    [/重试\s*\d+\s*次(?:均)?失败|尝试\s*\d+\s*次失败/i, "retry_failed"],
+    [/表结构读取失败|not_found|缺失字段/i, "lark_schema_failed"],
+    [/未找到\s*(?:record_id|姓名|候选人)|候选人主表未找到|合同信息表未找到/i, "record_resolve_failed"]
+  ];
+  for (const [pattern, errorType] of failurePatterns) {
+    if (pattern.test(normalized)) {
+      return {
+        status: "failed",
+        reason: "脚本输出中包含明确失败信号，不能按成功流程继续。",
+        error_type: errorType,
+        next: "请根据失败信号修复配置、LLM key、Lark 映射或候选人定位后重试。"
+      };
+    }
+  }
+
+  return { status: "success" };
+}
+
 function buildCheckpointPayload(
   action: string,
   fallback: { title: string; detail: string },
@@ -117,6 +168,7 @@ function buildCheckpointPayload(
   }
 
   const scoreLine = outputText.match(/价格:\s*(\d+\/\d+)\s+资历:\s*(\d+\/\d+)\s+微调:\s*([+-]?\d+)\s+初始档:\s*([A-Z])\s*→\s*最终档:\s*([A-Z])\s+总分:\s*(\d+)/);
+  const v2ScoreLine = outputText.match(/总分:\s*([0-9.]+)\/100\s+档位:\s*([A-Z])\s*→\s*([A-Z])\s+价格:\s*(\d+\/\d+)\s+资历:\s*(\d+\/\d+)\s+微调:\s*([+-]?\d+)/);
   const validLine = outputText.match(/有效简历判定:\s*([^\n]+?)\s*（(.+?)）/);
   const dryRunLine = outputText.match(/\[DRY-RUN\]\s*record=([^\s]+)\s+总分=(\d+)\s+初始评级=([A-Z])/);
   const pdfLine = outputText.match(/PDF 解析成功（(\d+)字符）/);
@@ -124,12 +176,12 @@ function buildCheckpointPayload(
     /PDF\s+(\d+)\s+字符[\s\S]*?总分=([0-9.]+)\s+档位=([A-Z])\s+有效=([^\s]+)\s+字数来源=\[([^\]]+)\]\s+置信度=\[([^\]]+)\]/
   );
   const llmStructuredLine = outputText.match(/✅\s*字数=([^\s]+)\s+年限=([^\s]+)\s+项目数=([^\s]+)[\s\S]*?总分=([0-9.]+)\s+档位=([A-Z])\s+有效=([^\s]+)\s+字数来源=\[([^\]]+)\]\s+置信度=\[([^\]]+)\]/);
-  const aiSuggestionLine = outputText.match(/AI建议=(.+)/);
-  const commentLine = outputText.match(/点评=(.+)/);
+  const aiSuggestionLine = outputText.match(/AI建议[:=]\s*(.+)/);
+  const commentLine = outputText.match(/点评[:=]\s*(.+)/);
 
-  const totalScore = evaluationSummary?.[2] ?? llmStructuredLine?.[4] ?? scoreLine?.[6] ?? dryRunLine?.[2] ?? "未识别";
-  const finalTier = evaluationSummary?.[3] ?? llmStructuredLine?.[5] ?? scoreLine?.[5] ?? dryRunLine?.[3] ?? "未识别";
-  const initialTier = scoreLine?.[4] ?? finalTier;
+  const totalScore = evaluationSummary?.[2] ?? llmStructuredLine?.[4] ?? v2ScoreLine?.[1] ?? scoreLine?.[6] ?? dryRunLine?.[2] ?? "未识别";
+  const finalTier = evaluationSummary?.[3] ?? llmStructuredLine?.[5] ?? v2ScoreLine?.[3] ?? scoreLine?.[5] ?? dryRunLine?.[3] ?? "未识别";
+  const initialTier = v2ScoreLine?.[2] ?? scoreLine?.[4] ?? finalTier;
   const validResume = evaluationSummary?.[4] ?? llmStructuredLine?.[6] ?? validLine?.[1]?.trim() ?? "未识别";
   const evidence = validLine?.[2]?.trim() ?? "未识别";
   const parsedChars = evaluationSummary?.[1] ?? pdfLine?.[1] ?? "未识别";
@@ -145,10 +197,10 @@ function buildCheckpointPayload(
   return {
     title: "简历评估结果待确认",
     detail:
-      `${candidateName ?? "该候选人"} 的简历附件已完成下载、文本提取、LLM 结构化评估和评分${isDryRun ? "预览" : "写回"}：总分 ${totalScore}，评级 ${finalTier}，有效简历=${validResume}。\n` +
+      `${candidateName ?? "该候选人"} 的简历评估节点已完成${isDryRun ? "预览" : "写回"}：总分 ${totalScore}，评级 ${finalTier}，有效简历=${validResume}。\n` +
       `本次读取 record_id=${recordId}，PDF 文本 ${parsedChars} 字符；字数来源=${wordCountSource}，置信度=${confidence}。\n` +
       (isDryRun
-        ? "VM 确认后，正式执行会写回 Lark 字段：解析字数、解析年限、解析项目数、总分、初始评级、评分依据、AI建议、点评、有效简历、评分置信度。"
+        ? "VM 确认后，正式执行会写回 Lark 字段：总分、初始评级、评分依据、AI建议、有效简历和 workflow_log。"
         : "本次已由底层脚本按 production 写回评分字段；该 checkpoint 只用于复核和审计留痕。"),
     required: true,
     summary: {
@@ -172,16 +224,12 @@ function buildCheckpointPayload(
       evidence
     },
     writeback_fields_after_confirm: [
-      "解析字数",
-      "解析年限",
-      "解析项目数",
       "总分",
       "初始评级",
       "评分依据",
       "AI建议",
-      "点评",
       "有效简历",
-      "评分置信度"
+      "workflow_log"
     ]
   };
 }
@@ -273,6 +321,9 @@ export async function POST(request: NextRequest) {
           {
             action: plan.action,
             source: "existing_agent_script",
+            workflow_version: plan.workflowVersion,
+            script_role: plan.scriptRole,
+            is_legacy: plan.isLegacy ?? false,
             note: "本步骤只调用现有脚本，不在前端或 API 层重写业务逻辑。"
           },
           plan.action
@@ -286,6 +337,9 @@ export async function POST(request: NextRequest) {
             script: plan.script,
             args: plan.args,
             command_preview: safeCommandForDisplay(plan.script, plan.args),
+            workflow_version: plan.workflowVersion,
+            script_role: plan.scriptRole,
+            is_legacy: plan.isLegacy ?? false,
             safety:
               plan.effectiveMode === "dry_run"
                 ? "当前实际执行为 dry-run：不会发送邮件、不会写业务主表、不会生成正式合同文件。"
@@ -335,7 +389,9 @@ export async function POST(request: NextRequest) {
       });
 
       child.on("close", (code) => {
-        if (code === 0) {
+        const outputText = outputChunks.join("");
+        const businessResult = analyzeBusinessResult(outputText);
+        if (code === 0 && businessResult.status === "success") {
           send(
             event(
               "step_done",
@@ -375,8 +431,20 @@ export async function POST(request: NextRequest) {
               "step_failed",
               {
                 exit_code: code,
+                business_status: businessResult.status,
+                reason:
+                  businessResult.status === "success"
+                    ? "脚本进程返回非零退出码。"
+                    : businessResult.reason,
+                error_type:
+                  businessResult.status === "success"
+                    ? "process_exit_failed"
+                    : businessResult.error_type,
                 recent_output: recentOutput,
-                next: "请根据 stderr/stdout 修复配置、附件路径或 Lark 映射后重试。"
+                next:
+                  businessResult.status === "success"
+                    ? "请根据 stderr/stdout 修复配置、附件路径或 Lark 映射后重试。"
+                    : businessResult.next
               },
               plan.action
             )

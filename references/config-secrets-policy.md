@@ -39,7 +39,6 @@ VM 只需要填写 `config.local.yaml`，不需要改脚本。
 ```bash
 git ls-files | grep -E 'config\\.yaml|config\\.local\\.yaml|lark-field-mapping\\.yaml|\\.env'
 git check-ignore -v config.yaml config.local.yaml config/lark-field-mapping.yaml
-python3 scripts/privacy_scan.py
 python3 scripts/check_config.py
 ```
 
@@ -47,8 +46,7 @@ python3 scripts/check_config.py
 
 - 第一条不应返回真实配置文件。
 - 第二条应显示这些文件被 `.gitignore` 命中。
-- 第三条应通过当前 tracked 文件敏感信息扫描。
-- 第四条应显示当前读取 `config.local.yaml`，并在关键配置失败时返回失败。
+- 第三条应显示当前读取 `config.local.yaml`，并在关键配置失败时返回失败。
 
 ## Git 历史脱敏
 

@@ -20,6 +20,8 @@ export type LarkConfigTable = {
   purpose: string;
   baseToken: string;
   tableId: string;
+  source?: string;
+  sourceNote?: string;
   url: string;
   fieldCount: number;
   fields: Array<{

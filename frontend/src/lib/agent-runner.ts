@@ -54,6 +54,9 @@ export type PlannedCommand = {
   requestedMode: AgentRunMode;
   effectiveMode: AgentRunMode;
   modeNote: string;
+  workflowVersion?: string;
+  scriptRole?: string;
+  isLegacy?: boolean;
   candidateName?: string;
   candidateRecordId?: string;
   script: string;
@@ -199,17 +202,20 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
       requestedMode,
       effectiveMode,
       modeNote: modeNote(requestedMode, effectiveMode, action),
+      workflowVersion: "v2-two-stage-scoring",
+      scriptRole: "current_main_path",
+      isLegacy: false,
       candidateName: candidate.name,
       candidateRecordId: candidate.recordId,
-      script: `${SKILL_ROOT}/scripts/evaluate_resumes.py`,
-      args: [...candidate.args, ...modeArgs(effectiveMode), "--force"],
+      script: `${SKILL_ROOT}/scripts/rescore_and_write_v2.py`,
+      args: [...candidate.args, ...modeArgs(effectiveMode)],
       validationErrors,
       checkpointAfterSuccess: {
         title: "简历评估结果确认",
         detail:
           effectiveMode === "dry_run"
-            ? "简历附件下载、文本提取、LLM 结构化评估与评分已完成预览。VM 确认后才允许写回正式字段。"
-            : "简历附件下载、文本提取、LLM 结构化评估与评分已正式写回。该确认点仅用于人工复核和留痕。"
+            ? "当前主流程评分已完成预览。VM 确认后才允许写回正式字段。"
+            : "当前主流程评分已正式写回。该确认点仅用于人工复核和留痕。"
       }
     };
   }

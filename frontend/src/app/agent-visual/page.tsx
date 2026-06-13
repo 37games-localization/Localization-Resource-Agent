@@ -1041,8 +1041,10 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
             <div className="config-id-grid">
               <Info label="base_token" value={table.baseToken || "未配置"} mono />
               <Info label="table_id" value={table.tableId || "未配置"} mono />
+              {table.source && <Info label="来源" value={table.source} mono />}
               <Info label="映射字段数" value={`${table.fieldCount}`} mono accent />
             </div>
+            {table.sourceNote && <p>{table.sourceNote}</p>}
             {table.fields.length > 0 && (
               <details>
                 <summary>查看字段映射</summary>
