@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { findLarkRecord, getSkillConfigPath, getSkillRoot, textValue, type LarkRecord } from "@/lib/lark-data-access";
 
 export type AgentAction =
+  | "resume-evaluate"
   | "score"
   | "test-email"
   | "contract-generate"
@@ -86,7 +87,8 @@ function inferAction(message: string): AgentAction {
   if (message.includes("签字") || message.includes("核查") || message.includes("检查")) return "signed-contract-check";
   if (message.includes("合同")) return "contract-generate";
   if (message.includes("测试")) return "test-email";
-  if (message.includes("评分") || message.includes("简历") || message.includes("初筛")) return "score";
+  if (message.includes("重算评分") || message.includes("重跑评分") || message.includes("重新评分")) return "score";
+  if (message.includes("评分") || message.includes("简历") || message.includes("初筛")) return "resume-evaluate";
   if (message.includes("状态") || message.includes("推进") || message.includes("财务登记")) return "update-status";
   return "unknown";
 }
@@ -172,7 +174,7 @@ function modeNote(requestedMode: AgentRunMode, effectiveMode: AgentRunMode, acti
   if (effectiveMode === "dry_run") {
     return "dry_run：只生成真实预览事件；不发送邮件、不写业务主表、不生成正式合同文件。";
   }
-  if (action === "score") {
+  if (action === "score" || action === "resume-evaluate") {
     return "production：调用现有评分脚本正式写回评分字段；本次 checkpoint 只用于审阅，不再重复写回。";
   }
   if (requestedMode === "production") {
@@ -188,13 +190,40 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
     action === "contract-generate" || action === "signed-contract-check"
       ? resolveForContractTable(request)
       : resolveForCandidateTable(request);
-  const effectiveMode = requestedMode === "production" && action === "score" ? "production" : "dry_run";
+  const effectiveMode =
+    requestedMode === "production" && (action === "score" || action === "resume-evaluate")
+      ? "production"
+      : "dry_run";
   const explicitAttachment = request.attachments?.find(Boolean);
   const firstAttachment = explicitAttachment;
   const validationErrors: string[] = [...(candidate.validationErrors ?? [])];
 
   if (action !== "unknown" && candidate.args.length === 0) {
     validationErrors.push("缺少候选人定位信息：请提供对应表的 record_id、姓名全称、昵称、邮箱或编号。");
+  }
+
+  if (action === "resume-evaluate") {
+    return {
+      action,
+      requestedMode,
+      effectiveMode,
+      modeNote: modeNote(requestedMode, effectiveMode, action),
+      workflowVersion: "v2-resume-evaluate",
+      scriptRole: "current_main_path",
+      isLegacy: false,
+      candidateName: candidate.name,
+      candidateRecordId: candidate.recordId,
+      script: `${SKILL_ROOT}/scripts/evaluate_resume_node.py`,
+      args: [...candidate.args, ...modeArgs(effectiveMode)],
+      validationErrors,
+      checkpointAfterSuccess: {
+        title: "简历评估结果确认",
+        detail:
+          effectiveMode === "dry_run"
+            ? "简历解析和评分已完成预览。VM 确认后才允许写回正式字段。"
+            : "简历解析和评分已正式写回。该确认点用于人工复核和留痕。"
+      }
+    };
   }
 
   if (action === "score") {

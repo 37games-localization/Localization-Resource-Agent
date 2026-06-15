@@ -86,6 +86,7 @@ function estimateAiUsage({
   const apiUsage = parseUsageFromOutput(outputText);
   const hasLlmSignal =
     action === "score" ||
+    action === "resume-evaluate" ||
     /LLM|OpenAI-compatible|DeepSeek|Claude|GPT|解析简历|PDF\s+\d+\s+字符/i.test(outputText);
   const parsedPdfChars = Number(outputText.match(/PDF\s+(\d+)\s+字符/)?.[1] ?? outputText.match(/PDF 解析成功（(\d+)字符）/)?.[1]);
   const estimatedInputChars = Number.isFinite(parsedPdfChars)
@@ -250,7 +251,7 @@ function buildCheckpointPayload(
     };
   }
 
-  if (action !== "score") {
+  if (action !== "score" && action !== "resume-evaluate") {
     return {
       title: fallback.title,
       detail: fallback.detail,
@@ -266,8 +267,17 @@ function buildCheckpointPayload(
     };
   }
 
-  const scoreLine = outputText.match(/价格:\s*(\d+\/\d+)\s+资历:\s*(\d+\/\d+)\s+微调:\s*([+-]?\d+)\s+初始档:\s*([A-Z])\s*→\s*最终档:\s*([A-Z])\s+总分:\s*(\d+)/);
-  const v2ScoreLine = outputText.match(/总分:\s*([0-9.]+)\/100\s+档位:\s*([A-Z])\s*→\s*([A-Z])\s+价格:\s*(\d+\/\d+)\s+资历:\s*(\d+\/\d+)\s+微调:\s*([+-]?\d+)/);
+  const scorePart = "([0-9.]+\\/[0-9.]+)";
+  const scoreLine = outputText.match(
+    new RegExp(
+      `价格:\\s*${scorePart}\\s+资历:\\s*${scorePart}\\s+微调:\\s*([+-]?\\d+)\\s+初始档:\\s*([A-Z])\\s*→\\s*最终档:\\s*([A-Z])\\s+总分:\\s*([0-9.]+)`
+    )
+  );
+  const v2ScoreLine = outputText.match(
+    new RegExp(
+      `总分:\\s*([0-9.]+)\\/100\\s+档位:\\s*([A-Z])\\s*→\\s*([A-Z])\\s+价格:\\s*${scorePart}\\s+资历:\\s*${scorePart}\\s+微调:\\s*([+-]?\\d+)`
+    )
+  );
   const validLine = outputText.match(/有效简历判定:\s*([^\n]+?)\s*（(.+?)）/);
   const dryRunLine = outputText.match(/\[DRY-RUN\]\s*record=([^\s]+)\s+总分=(\d+)\s+初始评级=([A-Z])/);
   const pdfLine = outputText.match(/PDF 解析成功（(\d+)字符）/);
@@ -275,6 +285,7 @@ function buildCheckpointPayload(
     /PDF\s+(\d+)\s+字符[\s\S]*?总分=([0-9.]+)\s+档位=([A-Z])\s+有效=([^\s]+)\s+字数来源=\[([^\]]+)\]\s+置信度=\[([^\]]+)\]/
   );
   const llmStructuredLine = outputText.match(/✅\s*字数=([^\s]+)\s+年限=([^\s]+)\s+项目数=([^\s]+)[\s\S]*?总分=([0-9.]+)\s+档位=([A-Z])\s+有效=([^\s]+)\s+字数来源=\[([^\]]+)\]\s+置信度=\[([^\]]+)\]/);
+  const parseResultLine = outputText.match(/解析结果:\s*字数=([^\s]+)\s+年限=([^\s]+)\s+项目数=([^\s]+)\s+知名实体=([^\n\r]*)/);
   const aiSuggestionLine = outputText.match(/AI建议[:=]\s*(.+)/);
   const commentLine = outputText.match(/点评[:=]\s*(.+)/);
 
@@ -285,11 +296,11 @@ function buildCheckpointPayload(
   const evidence = validLine?.[2]?.trim() ?? "未识别";
   const parsedChars = evaluationSummary?.[1] ?? pdfLine?.[1] ?? "未识别";
   const recordId = dryRunLine?.[1] ?? candidateRecordId ?? "未识别";
-  const wordCountSource = evaluationSummary?.[5] ?? llmStructuredLine?.[7] ?? "未识别";
-  const confidence = evaluationSummary?.[6] ?? llmStructuredLine?.[8] ?? "未识别";
-  const extractedWordCount = llmStructuredLine?.[1] ?? "未识别";
-  const years = llmStructuredLine?.[2] ?? "未识别";
-  const projectCount = llmStructuredLine?.[3] ?? "未识别";
+  const wordCountSource = evaluationSummary?.[5] ?? llmStructuredLine?.[7] ?? (parseResultLine ? "LLM解析写回" : "未提供");
+  const confidence = evaluationSummary?.[6] ?? llmStructuredLine?.[8] ?? (parseResultLine ? "高（已提取结构化字段）" : "未提供");
+  const extractedWordCount = llmStructuredLine?.[1] ?? parseResultLine?.[1] ?? "未识别";
+  const years = llmStructuredLine?.[2] ?? parseResultLine?.[2] ?? "未识别";
+  const projectCount = llmStructuredLine?.[3] ?? parseResultLine?.[3] ?? "未识别";
   const aiSuggestion = aiSuggestionLine?.[1]?.trim() ?? "未识别";
   const comment = commentLine?.[1]?.trim() ?? "未识别";
 
@@ -512,7 +523,9 @@ export async function POST(request: NextRequest) {
                 exit_code: code,
                 requested_mode: plan.requestedMode,
                 execution_mode: plan.effectiveMode,
-                business_writeback: plan.effectiveMode === "production" && plan.action === "score",
+                business_writeback:
+                  plan.effectiveMode === "production" &&
+                  (plan.action === "score" || plan.action === "resume-evaluate"),
                 email_sent: plan.effectiveMode === "production" && plan.action === "test-email",
                 contract_file_generated: plan.effectiveMode === "production" && plan.action === "contract-generate"
               },
