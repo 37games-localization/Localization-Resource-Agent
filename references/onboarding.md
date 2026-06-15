@@ -2,24 +2,36 @@
 
 ## 概览
 
-安装完成后按以下顺序操作，整个过程约 20-30 分钟。
+本文档是给 Agent 执行安装引导用的，不是让 VM 自己照着命令清单处理。
+
+VM 安装完成后，只需要对 OpenClaw 说：
+
+```text
+帮我完成资源管理 Agent 初始化配置
+```
+
+Agent 必须按本文档一步步带 VM 走完整配置，整个过程约 20-30 分钟。
 完成后你的 OpenClaw 可以处理简历筛选、测试题发送、合同生成、状态追踪的全流程。
 
-你不需要读完整仓库。首次安装只需要跟着本引导走；日常使用直接用自然语言告诉 Agent 要处理什么。
+VM 不需要读完整仓库，也不需要先理解命令行。首次安装由 Agent 解释每一步要填什么、为什么要填、填完后如何验证；日常使用直接用自然语言告诉 Agent 要处理什么。
 
 ---
 
 ## 第一步：安装依赖
 
+Agent 先检查本机是否已有依赖；缺什么再提示 VM 安装或由 Agent 执行安装命令。
+
 ```bash
 pip3 install pymupdf anthropic pyyaml python-docx
 ```
 
-如果用 Windows，用 `pip` 代替 `pip3`。
+如果是 Windows，Agent 应提示使用 `pip` 代替 `pip3`，并检查 Python 路径是否可用。
 
 ---
 
 ## 第二步：绑定飞书 bot
+
+Agent 先检查 `lark-cli` 是否可用；未绑定时，引导 VM 提供 App ID / App Secret 并执行绑定。
 
 ```bash
 lark-cli config bind --source openclaw --identity bot-only
@@ -41,7 +53,7 @@ App ID / App Secret 请向当前项目管理员获取。
 
 合同模板存储在**飞书合同模板汇总表**，脚本自动从飞书下载，**不需要在本地维护模板文件**。
 
-确认 bot 有权限访问以下两张飞书表：
+Agent 需要确认 bot 有权限访问以下两张飞书表；如果没有权限，停止并告诉 VM 需要补哪张表的权限：
 - 合同模板表（base-token: 如实填入 `config.local.yaml` 中的 `lark.template_base_token`）
 - 合同信息收集表（base-token: `lark.contract_base_token`）
 
@@ -49,22 +61,24 @@ App ID / App Secret 请向当前项目管理员获取。
 
 ## 第四步：生成并填写 config.local.yaml
 
-先从模板生成本机配置：
+Agent 先从模板生成本机配置：
 
 ```bash
 cd ~/.agents/skills/loc-resume-screening
 cp config.example.yaml config.local.yaml
 ```
 
-然后打开 skill 目录下的 `config.local.yaml`：
+然后 Agent 逐项询问 VM 并写入 skill 目录下的 `config.local.yaml`：
 
 ```
 ~/.agents/skills/loc-resume-screening/config.local.yaml
 ```
 
-按照以下说明逐项填写：
+VM 不需要自己理解 YAML；Agent 应把每个配置项翻译成人能理解的问题，拿到答案后写入配置，再复述已写入内容供 VM 确认。
 
 ### SMTP（邮件发送）
+
+Agent 询问 VM 的发件邮箱、SMTP host、端口、授权码和展示名称，然后写入：
 
 ```yaml
 smtp:
@@ -81,6 +95,8 @@ smtp:
 - 企业邮箱：`smtp.example.com`（port: 465）
 
 ### 飞书配置
+
+Agent 询问或从 VM 粘贴的 Lark 链接中解析 base token / table id，并写入：
 
 ```yaml
 lark:
@@ -103,6 +119,8 @@ lark:
 
 简历解析会调用 LLM，需要显式配置 API Key。skill 不会自动读取 OpenClaw 的本机 provider 或 `openclaw.json`，避免静默消耗 OpenClaw 月度额度。
 
+Agent 需要向 VM 明确说明：没有可用 LLM key 时，简历解析节点会停止；评分重算等不依赖 LLM 的节点仍可运行。
+
 ```yaml
 llm:
   base_url: "https://ai-proxy.37wan.com/anthropic"
@@ -118,6 +136,8 @@ export LOC_LLM_API_KEY="你的apiKey"
 
 ### 路径配置
 
+Agent 询问 VM 希望合同 docx 保存在哪里；没有偏好时使用默认目录：
+
 ```yaml
 paths:
   contract_output: "~/Documents/loc-contracts/output/"   # 生成的合同 docx 保存位置
@@ -127,6 +147,8 @@ paths:
 > 合同模板无需本地维护，脚本自动从飞书下载。
 
 ### 测试模式（先不要改）
+
+Agent 必须先保持 TEST_MODE，并让 VM 填自己的测试邮箱：
 
 ```yaml
 test_mode:
@@ -140,12 +162,20 @@ test_mode:
 
 对 OpenClaw 说：**「帮我验证资源管理配置」**
 
-OpenClaw 会自动检查：
+Agent 执行：
+
+```bash
+python3 scripts/check_config.py
+```
+
+并用自然语言向 VM 展示检查结果：
 - ✅ config.local.yaml 格式正确
 - ✅ SMTP 可以连通
 - ✅ lark-cli bot 权限正常
 - ✅ LLM api_key 有效
 - ✅ 合同模板目录存在
+
+如果失败，Agent 不要让 VM 自己排查命令；要指出失败项、需要 VM 提供的信息、以及下一步怎么修。
 
 ---
 
@@ -153,7 +183,7 @@ OpenClaw 会自动检查：
 
 配置验证通过后，对 OpenClaw 说：**「锁定资源管理 Agent 安装目录」**
 
-OpenClaw 会执行：
+Agent 执行：
 
 ```bash
 python3 scripts/lock_user_install.py
@@ -176,7 +206,7 @@ python3 scripts/lock_user_install.py
 打开资源管理工作台
 ```
 
-Agent 会执行：
+Agent 执行：
 
 ```bash
 python3 scripts/start_frontend.py
@@ -192,17 +222,17 @@ python3 scripts/start_frontend.py
 
 1. **简历解析**：找一条已有记录，解析 PDF，看结果是否合理
 2. **评分重算**：重算该记录评分，确认写回飞书
-3. **测试题发送**：选一个候选人，模拟发测试题到你自己邮箱
-4. **合同生成**：选一个合同信息完整的记录，生成 docx，发到你自己邮箱
+3. **测试题发送**：选一个候选人，把测试题发到 TEST_MODE 邮箱
+4. **合同生成**：选一个合同信息完整的记录，生成 docx，并在 TEST_MODE 下验证邮件内容
 5. **状态推进**：手动推进一条记录状态，确认飞书更新
 
-每步确认无误后继续下一步。
+Agent 每步都要展示：本步骤读了什么输入、调用了哪个脚本、输出了什么、是否写回 Lark、是否需要 VM 人工确认。每步确认无误后继续下一步。
 
 ---
 
 ## 第八步：正式启用
 
-所有步骤验证通过后，修改 config.local.yaml：
+所有步骤验证通过后，Agent 再引导 VM 切正式环境，并修改 `config.local.yaml`：
 
 ```yaml
 test_mode:
@@ -237,15 +267,17 @@ test_mode:
 
 没有别的了。上下文、运行日志、评分明细由系统自动收集，导出为统一协议的脱敏 snapshot JSON，并上传到飞书「Badcase快照」附件字段。GitHub issue 由项目负责人集中读取 snapshot 后创建，VM 不需要 GitHub 权限。
 
-**统一上报协议**：
+Agent 内部会按统一协议生成脱敏快照，VM 不需要理解 GitHub issue 格式，也不需要 GitHub 权限。
 
-- VM 侧只生成 `snapshot_version=2.0` 的脱敏 JSON。
-- 不允许不同 Agent 自由拼 GitHub issue 标题和正文。
-- issue 标题、正文、label 统一由 `scripts/badcase_protocol.py` / `scripts/push_badcase_issues.py` 生成。
-- snapshot 脱敏校验失败时会跳过，不允许强行上传。
-- 禁止包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。
+脱敏快照不得包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。脱敏校验失败时，Agent 必须停止上报并告诉 VM 需要项目维护者处理。
 
-**开启 Badcase 自动导出**：在 `config.local.yaml` 中设置：
+如需开启自动导出，VM 只需要对 Agent 说：
+
+```text
+帮我开启 Badcase 自动导出
+```
+
+Agent 会在 `config.local.yaml` 中设置：
 
 ```yaml
 badcase_export:
@@ -282,11 +314,17 @@ Prompt、邮件模板、核心脚本、前端/API 和 workflow 路由不属于 V
 ## 常见问题
 
 **Q: `ModuleNotFoundError: fitz`**
+
+把报错发给 Agent，Agent 会补装缺失依赖。手动备用命令：
+
 ```bash
 pip3 install pymupdf
 ```
 
 **Q: `ModuleNotFoundError: yaml`**
+
+把报错发给 Agent，Agent 会补装缺失依赖。手动备用命令：
+
 ```bash
 pip3 install pyyaml
 ```
@@ -301,6 +339,6 @@ pip3 install pyyaml
 - 确认 bot 在目标表格有管理员权限
 
 **Q: LLM api_key 找不到**
-- 在 config.local.yaml 的 `llm.api_key` 里直接填
-- 或设置环境变量：`export LOC_LLM_API_KEY="你的key"`
+- 让 Agent 帮你写入 `config.local.yaml` 的 `llm.api_key`
+- 或让 Agent 指引你设置环境变量：`LOC_LLM_API_KEY`
 - skill 不会自动读取 OpenClaw provider；这是为了避免消耗 OpenClaw 月度额度

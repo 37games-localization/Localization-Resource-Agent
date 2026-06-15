@@ -77,7 +77,7 @@ Agent 会逐步引导 VM 完成：
 - 识别飞书表头，检查缺列/多列/字段改名。
 - VM 确认后自动补齐允许创建的辅助列，并完成内部校验。
 
-配置通过后，VM 日常只需要用自然语言调用，例如「看下 XXX 的简历」「给 XXX 准备合同」「把这个标成 badcase」。技术命令和排障步骤保留在 onboarding 文档里，不作为 VM 的默认入口。
+配置通过后，VM 日常只需要用自然语言调用，例如「看下 XXX 的简历」「给 XXX 准备合同」「把这个标成 badcase」。`references/onboarding.md` 是给 Agent 读取并执行的安装引导，不是让 VM 自己照着命令清单处理。
 
 详细引导见 [`references/onboarding.md`](references/onboarding.md)
 

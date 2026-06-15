@@ -10,7 +10,7 @@ description: "本地化资源管理全流程 skill，覆盖译者简历筛选到
 ## 核心原则
 
 - **飞书是大脑**：状态/数据全在飞书，脚本每次从表里读，不靠上下文
-- **config.local.yaml 是本机唯一配置入口**：VM 从模板生成后只改这一个文件，不动脚本；`config.yaml` / `config.example.yaml` 只保留占位模板
+- **config.local.yaml 是本机唯一配置入口**：首次安装由 Agent 从模板生成并引导 VM 填写，只改这一个本机文件，不动脚本；`config.yaml` / `config.example.yaml` 只保留占位模板
 - **LLM Key 显式配置**：解析简历前必须配置 `llm.api_key` 或 `LOC_LLM_API_KEY`，不自动读取 OpenClaw 额度
 - **两阶段评分**：LLM 解析（一次性）→ 规则评分（可反复，确定性）
 - **TEST_MODE 保护**：正式启用前所有邮件发到测试邮箱
@@ -18,7 +18,7 @@ description: "本地化资源管理全流程 skill，覆盖译者简历筛选到
 
 ## 配置与安装
 
-VM 首次使用时，先读引导文档：[`references/onboarding.md`](references/onboarding.md)
+VM 首次使用时，默认对 Agent 说「帮我完成资源管理 Agent 初始化配置」。Agent 必须先读引导文档 [`references/onboarding.md`](references/onboarding.md)，再一步步带 VM 完成配置、验证、锁定和功能展示。
 
 配置验证指令（VM 说「帮我验证资源管理配置」时执行）：
 ```bash
