@@ -11,7 +11,9 @@ import {
   fetchCandidateResources,
   fetchLarkConfig,
   fetchWorkflowTraces,
+  runSchemaCheckpoint,
   type LarkConfigPayload,
+  type SchemaCheckpointPayload,
   type WorkflowTraceEntry
 } from "@/lib/resource-agent-api";
 
@@ -1061,6 +1063,32 @@ function ModeSwitch({
 }
 
 function ConfigView({ config, configSource }: { config: LarkConfigPayload | null; configSource: string }) {
+  const [schemaCheckpoint, setSchemaCheckpoint] = useState<SchemaCheckpointPayload | null>(null);
+  const [schemaNote, setSchemaNote] = useState("");
+  const [schemaBusy, setSchemaBusy] = useState(false);
+  const [schemaMessage, setSchemaMessage] = useState("");
+
+  const runSchemaAction = async (action: "propose" | "adjust" | "confirm", createMissingFields = false) => {
+    setSchemaBusy(true);
+    setSchemaMessage("");
+    try {
+      const payload = await runSchemaCheckpoint({
+        action,
+        createMissingFields,
+        note: action === "adjust" ? schemaNote : undefined,
+        table: "all",
+        ...(action === "propose" ? {} : { ["token"]: schemaCheckpoint?.checkpoint_token })
+      });
+      setSchemaCheckpoint(payload);
+      if (action === "adjust") setSchemaNote("");
+      setSchemaMessage(payload.message || (action === "confirm" ? "字段映射已确认保存。" : "字段映射 checkpoint 已生成。"));
+    } catch (error) {
+      setSchemaMessage(error instanceof Error ? error.message : "字段映射 checkpoint 执行失败");
+    } finally {
+      setSchemaBusy(false);
+    }
+  };
+
   return (
     <section className="visual-config-page">
       <div className="config-hero">
@@ -1076,6 +1104,97 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
         <Info label="本机配置" value={config?.configPath ?? "读取中"} mono />
         <Info label="字段映射" value={config?.mappingPath ?? "读取中"} mono />
       </div>
+
+      <section className="schema-checkpoint-card">
+        <div className="schema-checkpoint-head">
+          <div>
+            <span>SCHEMA CHECKPOINT</span>
+            <h2>换表前字段映射确认</h2>
+            <p>Agent 会读取当前 Lark 表头，生成字段映射建议。VM 确认后才会保存映射；如需调整，可以用自然语言说明。</p>
+          </div>
+          <strong className={`schema-status ${schemaCheckpoint?.status || "idle"}`}>
+            {schemaCheckpoint?.status || "未检查"}
+          </strong>
+        </div>
+        <div className="schema-actions">
+          <button disabled={schemaBusy} onClick={() => runSchemaAction("propose")} type="button">
+            检查字段映射
+          </button>
+          <button disabled={schemaBusy} onClick={() => runSchemaAction("propose", true)} type="button">
+            补齐缺失列并检查
+          </button>
+          <button disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token} onClick={() => runSchemaAction("confirm")} type="button">
+            确认保存映射
+          </button>
+        </div>
+        <div className="schema-adjust-row">
+          <textarea
+            onChange={(event) => setSchemaNote(event.target.value)}
+            placeholder="例如：把 candidate.resume 映射到 简历附件；将 contract.email 改成 常用工作邮箱"
+            value={schemaNote}
+          />
+          <button disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token || !schemaNote.trim()} onClick={() => runSchemaAction("adjust")} type="button">
+            提交调整
+          </button>
+        </div>
+        {schemaMessage && <p className="schema-message">{schemaMessage}</p>}
+        {schemaCheckpoint && (
+          <div className="schema-result">
+            <div className="schema-token">
+              <Info label="checkpoint" value={schemaCheckpoint.checkpoint_token || "-"} mono accent />
+              <Info label="缺口" value={`${schemaCheckpoint.hard_failures?.length ?? 0}`} mono warning={(schemaCheckpoint.hard_failures?.length ?? 0) > 0} />
+              <Info label="映射文件" value={schemaCheckpoint.mapping_path || config?.mappingPath || "-"} mono />
+            </div>
+            {schemaCheckpoint.hard_failures && schemaCheckpoint.hard_failures.length > 0 && (
+              <div className="schema-failures">
+                {schemaCheckpoint.hard_failures.map((item) => (
+                  <p key={item}>{item}</p>
+                ))}
+              </div>
+            )}
+            <div className="schema-table-list">
+              {(schemaCheckpoint.tables ?? []).map((table) => (
+                <details key={table.table_key} open={table.status !== "ready"}>
+                  <summary>
+                    <strong>{table.table_key}</strong>
+                    <span>{table.status}</span>
+                    <em>已映射 {table.mapped.length} / 疑似 {table.fuzzy.length} / 缺失 {table.missing.length}</em>
+                  </summary>
+                  {table.error && <p className="schema-error">{table.error}</p>}
+                  {table.fuzzy.length > 0 && (
+                    <div className="schema-mini-list">
+                      <h3>需要 VM 确认的疑似映射</h3>
+                      {table.fuzzy.slice(0, 10).map((item) => (
+                        <p key={`${table.table_key}-${item.logical_key}`}>
+                          <code>{item.logical_key}</code> → {item.field_name} <span>score={item.score}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  {table.missing.length > 0 && (
+                    <div className="schema-mini-list">
+                      <h3>缺失字段</h3>
+                      {table.missing.slice(0, 10).map((item) => (
+                        <p key={`${table.table_key}-${item.logical_key}`}>
+                          <code>{item.logical_key}</code> / {item.expected_name} / {item.required ? "必需" : "建议"}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  <div className="schema-mini-list">
+                    <h3>当前映射</h3>
+                    {table.mapped.slice(0, 16).map((item) => (
+                      <p key={`${table.table_key}-${item.logical_key}`}>
+                        <code>{item.logical_key}</code> → {item.field_name} <span>{item.match_type}</span>
+                      </p>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       <div className="config-table-grid">
         {(config?.tables ?? []).map((table) => (
