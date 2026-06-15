@@ -3631,13 +3631,6 @@ h1 {
   color: var(--visual-muted);
 }
 
-.schema-type-mismatch {
-  background: rgba(218, 54, 51, 0.055);
-  border: 1px solid rgba(218, 54, 51, 0.16);
-  border-radius: 7px;
-  padding: 10px;
-}
-
 .schema-mini-list code {
   color: var(--visual-blue);
   font-family: "SFMono-Regular", Consolas, monospace;
@@ -3649,47 +3642,6 @@ h1 {
   display: inline;
   font-size: 11px;
   margin: 0 0 0 6px;
-}
-
-.schema-mapping-row {
-  align-items: center;
-  background: rgba(13, 17, 23, 0.36);
-  border: 1px solid rgba(240, 246, 252, 0.075);
-  border-radius: 7px;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.45fr);
-  padding: 10px;
-}
-
-.schema-mapping-row div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.schema-mapping-row strong {
-  color: var(--visual-text);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.schema-mapping-row span {
-  color: var(--visual-muted);
-  font-size: 11px;
-  line-height: 1.45;
-  margin: 0;
-}
-
-.schema-mapping-row select {
-  background: rgba(22, 27, 34, 0.94);
-  border: 1px solid rgba(56, 139, 253, 0.26);
-  border-radius: 7px;
-  color: var(--visual-text);
-  font-size: 12px;
-  min-width: 0;
-  padding: 9px 10px;
-  width: 100%;
 }
 
 .config-table-grid {

@@ -59,7 +59,6 @@ FLD_ID_NO     = field_id_or("contract_info", "contract.id_number", "fld3hdHuVd")
 FLD_BANK_NAME = field_id_or("contract_info", "contract.bank_name", "fldyPyrLdp")
 FLD_BANK_ADDR = field_id_or("contract_info", "contract.bank_address", "fldDLk0Jh9")
 FLD_CURRENCY  = field_id_or("contract_info", "contract.currency", "fldSZE1Shy")
-FLD_CURRENCY_OTHER = field_id_or("contract_info", "contract.currency_other", "fldAvjeC5F")
 
 
 # ── lark-cli 工具 ──────────────────────────────────────────────
@@ -85,8 +84,7 @@ def lark_download_attachment(
          "--table-id", table_id,
          "--record-id", record_id,
          "--file-token", file_token,
-         "--output", dest.name,
-         "--as", "bot"],
+         "--output", dest.name],
         capture_output=True, text=True,
         cwd=str(dest.parent),
     )
@@ -178,20 +176,6 @@ def extract_text(val) -> str:
     return text
 
 
-def contract_currency_text(fields: dict) -> str:
-    """Return the effective currency, including the Lark "Other" text field.
-
-    The production form stores common currencies in a select field. JPY/EUR/KRW
-    and similar values are captured as "其他 Other" plus a companion text field.
-    Template routing needs the actual text, not only the select label.
-    """
-    primary = extract_text(fields.get(FLD_CURRENCY, ""))
-    other = extract_text(fields.get(FLD_CURRENCY_OTHER, ""))
-    if other and ("其他" in primary or "other" in primary.lower()):
-        return other
-    return primary or other
-
-
 def is_china_id_number(text: str) -> bool:
     """Return True for common mainland China resident ID format."""
     value = extract_text(text).replace(" ", "")
@@ -234,12 +218,12 @@ def is_company_account(fields: dict) -> bool:
 
 
 def is_cny_currency(fields: dict) -> bool:
-    currency = contract_currency_text(fields).lower()
+    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
     return "人民币" in currency or "cny" in currency or "rmb" in currency
 
 
 def is_foreign_currency(fields: dict) -> bool:
-    currency = contract_currency_text(fields).lower()
+    currency = extract_text(fields.get(FLD_CURRENCY, "")).lower()
     if not currency:
         return False
     foreign_markers = [
@@ -263,16 +247,6 @@ def score_contract_template(name: str, fields: dict) -> int:
     wants_foreign = is_foreign_currency(fields)
 
     score = 0
-
-    # Contract info currently carries payment/identity signals, but not a
-    # reliable service-type field. Prefer translation/service templates by
-    # default and avoid routing normal translation vendors to audio-only forms.
-    audio_markers = ["audio recording", "recording", "配音", "录音"]
-    translation_markers = ["翻译委托", "translation service", "service agreement"]
-    if any(marker in lowered or marker in name for marker in audio_markers):
-        score -= 40
-    if any(marker in lowered or marker in name.lower() for marker in translation_markers):
-        score += 15
 
     if is_company_acct:
         if "公司" in name or "business" in lowered or "company" in lowered:
@@ -408,22 +382,6 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
     """
     vm_overrides = vm_overrides or {}
     contract_defaults = _CFG.get("contract_defaults", {}) or {}
-    jia_fang = _CFG.get("jia_fang", {}) or {}
-
-    def default_for(var_name: str) -> str:
-        val = contract_defaults.get(var_name)
-        if val not in (None, ""):
-            return str(val)
-        if var_name in ("甲方联系人姓名", "甲方联系人邮箱", "甲方邮箱"):
-            contact = jia_fang.get("default_contact") or {}
-            if var_name == "甲方联系人姓名":
-                return str(contact.get("name") or "")
-            return str(contact.get("email") or "")
-        if var_name == "合同生效日期":
-            return vm_overrides.get("签署日期", datetime.now().strftime("%Y-%m-%d"))
-        if var_name == "提前终止通知天数":
-            return "30"
-        return ""
 
     # 获取账户类型，决定银行字段路由
     acct_type_raw = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
@@ -468,20 +426,9 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
             continue
 
         # 2.5 本机固定合同变量
-        default_value = default_for(var)
-        if default_value:
-            var_map[key] = default_value
+        if var in contract_defaults:
+            var_map[key] = str(contract_defaults[var])
             filled.append(var)
-            continue
-
-        # 2.6 收款货币可能由 select + Other-Text 组合而成
-        if var == "币种":
-            val = contract_currency_text(fields)
-            var_map[key] = val
-            if val:
-                filled.append(var)
-            else:
-                empty.append(var)
             continue
 
         # 3. 收集表字段
@@ -655,7 +602,7 @@ def send_email(to_email: str, name: str, contract_path: Path, lang: str = "zh", 
         raise RuntimeError("生产环境禁止直接发送合同邮件；请使用 --draft 生成草稿，由 VM 人工检查后发送。")
 
     if lang == "zh":
-        subject = f"【Localization Team】翻译委托框架协议 - {name}"
+        subject = f"【37GAMES】翻译委托框架协议 - {name}"
         body = (
             f"您好，\n\n感谢您提交合同信息。\n\n"
             f"请查收附件中的翻译委托框架协议，合同中的个人信息已预先填写。\n\n"
@@ -666,10 +613,10 @@ def send_email(to_email: str, name: str, contract_path: Path, lang: str = "zh", 
             f"4. 填写合同生效日期（即签字当天日期）\n"
             f"5. 扫描或拍照已签字页，发回此邮箱\n\n"
             f"如有任何问题，欢迎随时联系。\n\n"
-            f"Localization Team"
+            f"37GAMES 本地化团队"
         )
     else:
-        subject = f"[Localization Team] Service Agreement - {name}"
+        subject = f"[37GAMES] Service Agreement - {name}"
         body = (
             f"Dear {name},\n\n"
             f"Thank you for submitting your contract information.\n\n"
@@ -680,7 +627,7 @@ def send_email(to_email: str, name: str, contract_path: Path, lang: str = "zh", 
             f"3. Sign in the designated field\n"
             f"4. Fill in the effective date (today's date)\n"
             f"5. Scan the signed page and send it back\n\n"
-            f"Best regards,\nLocalization Team"
+            f"Best regards,\n37GAMES Localization Team"
         )
 
     msg = MIMEMultipart()
@@ -742,7 +689,6 @@ def main():
     parser.add_argument("--dry-run",   action="store_true", help="只打印变量，不生成文件")
     parser.add_argument("--send",      action="store_true", help="生成后发送邮件")
     parser.add_argument("--draft",     action="store_true", help="生成后保存草稿，VM 双击 .eml 后点发送")
-    parser.add_argument("--no-open",   action="store_true", help="生成后不自动打开 docx（用于自动化验证）")
     parser.add_argument("--yes",       action="store_true", help="跳过交互确认")
     args = parser.parse_args()
 
@@ -897,8 +843,7 @@ def main():
              "--table-id", TEMPLATE_TABLE,
              "--record-id", template_rec["record_id"],
              "--file-token", att_list[0]["file_token"],
-             "--output", template_docx.name,
-             "--as", "bot"],
+             "--output", template_docx.name],
             capture_output=True, text=True,
             cwd=str(template_docx.parent),
         )
@@ -953,18 +898,16 @@ def main():
             print("   提示：这些位置在合同中将显示为空白或原始占位符。")
         else:
             print("✅ 二次检查通过：所有变量已替换完毕")
+            log_manual_step(
+                step_name="合同 docx 生成",
+                status="done",
+                candidate_name=name,
+                candidate_record_id=target["record_id"],
+                input_summary=f"模板: {template_name}",
+                output_summary=f"文件: {output_path}",
+            )
 
-        log_manual_step(
-            step_name="合同 docx 生成",
-            status="done" if not remaining else "waiting",
-            candidate_name=name,
-            candidate_record_id=target["record_id"],
-            input_summary=f"模板: {template_name}",
-            output_summary=f"文件: {output_path}",
-        )
-
-        if not args.no_open:
-            open_docx(output_path)
+        open_docx(output_path)
 
         # ── 发送邮件 ──
         if args.send:
@@ -976,10 +919,7 @@ def main():
             else:
                 print("✅ 合同邮件已发送；「合同签署」字段等待签回核查节点更新。")
         else:
-            if args.no_open:
-                print(f"\n合同已生成，确认无误后运行：")
-            else:
-                print(f"\n合同已打开预览，确认无误后运行：")
+            print(f"\n合同已打开预览，确认无误后运行：")
             print(f"  python3 scripts/generate_contract.py --name '{name}' --send")
 
 

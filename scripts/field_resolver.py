@@ -5,7 +5,7 @@ Resolve logical field keys to Lark field IDs/names from
 config/lark-field-mapping.yaml.
 
 Business scripts should gradually migrate from hard-coded field IDs to this
-resolver after schema_mapping_checkpoint.py has confirmed a mapping.
+resolver after schema_validator.py has generated a mapping.
 """
 
 from pathlib import Path
@@ -21,7 +21,7 @@ class FieldMappingError(RuntimeError):
 def load_field_mapping(path: Path = MAPPING_PATH) -> dict:
     if not path.exists():
         raise FieldMappingError(
-            f"字段映射不存在：{path}。请先运行：python3 scripts/schema_mapping_checkpoint.py propose --table all，并在 VM 确认后运行 confirm"
+            f"字段映射不存在：{path}。请先运行：python3 scripts/schema_validator.py --table all"
         )
     try:
         import yaml

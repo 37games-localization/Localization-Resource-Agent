@@ -3,13 +3,13 @@
 export_badcase_snapshots.py  (VM 侧)
 =====================================
 扫描飞书主表中标记了「是否Badcase=⚠️ 是」的候选人记录，
-生成脱敏 JSON 快照，上传到飞书对应记录的「Badcase快照」附件字段。
+生成脱敏 JSON 快照，并默认直接创建 GitHub issue。
 
-VM 不需要任何 GitHub 权限。issue 由项目负责人那边集中开。
+Lark 附件上传不再作为默认链路，仅保留 --upload-lark 兼容旧流程。
 
 用法：
-    python3 scripts/export_badcase_snapshots.py            # 正常导出
-    python3 scripts/export_badcase_snapshots.py --dry-run  # 预览，不写飞书
+    python3 scripts/export_badcase_snapshots.py            # 正常上报 GitHub issue
+    python3 scripts/export_badcase_snapshots.py --dry-run  # 预览，不创建 issue
     python3 scripts/export_badcase_snapshots.py --quiet    # 静默（定时任务用）
 """
 
@@ -31,6 +31,9 @@ from manual_trace import log_manual_step
 from badcase_protocol import (
     SNAPSHOT_VERSION,
     build_snapshot as build_protocol_snapshot,
+    issue_body,
+    issue_labels,
+    issue_title,
     validate_snapshot,
 )
 
@@ -43,14 +46,13 @@ MAIN_TABLE_ID   = ""
 FIELDS: dict[str, str] = {}
 
 
-def _init_lark_refs():
+def _init_lark_refs(require_snapshot_field: bool = False):
     """Load current table and field IDs from config/lark-field-mapping.yaml."""
     global MAIN_BASE_TOKEN, MAIN_TABLE_ID, FIELDS
     MAIN_BASE_TOKEN, MAIN_TABLE_ID = table_ref("candidate")
     FIELDS = {
         "badcase": field_id("candidate", "candidate.badcase_flag"),
         "expected": field_id("candidate", "candidate.expected_result"),
-        "snapshot": field_id("candidate", "candidate.badcase_snapshot"),
         "status": field_id("candidate", "candidate.status"),
         "language_pair": field_id("candidate", "candidate.language_pair"),
         "services": field_id("candidate", "candidate.services"),
@@ -59,6 +61,8 @@ def _init_lark_refs():
         "ai_suggestion": field_id("candidate", "candidate.ai_suggestion"),
         "score_basis": field_id("candidate", "candidate.score_basis"),
     }
+    if require_snapshot_field:
+        FIELDS["snapshot"] = field_id("candidate", "candidate.badcase_snapshot")
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
 
@@ -120,10 +124,30 @@ def _load_run_log(record_id: str) -> dict:
         return {}
 
 
+def _snapshot_dir(cfg: dict) -> Path:
+    export_cfg = cfg.get("badcase_export", {})
+    return Path(export_cfg.get("export_dir", "~/Documents/loc-agent-badcase-exports/")).expanduser()
+
+
+def _github_repo(cfg: dict) -> str:
+    repo = (cfg.get("github") or {}).get("repo", "")
+    if repo and not repo.startswith("<"):
+        return repo
+    return ""
+
+
+def _github_env(cfg: dict) -> dict:
+    env = os.environ.copy()
+    token = (cfg.get("github") or {}).get("token", "")
+    if token and "GH_TOKEN" not in env:
+        env["GH_TOKEN"] = token
+    return env
+
+
 # ── 核心流程 ──────────────────────────────────────────────────────────────────
 
-def fetch_badcases() -> list[dict]:
-    _init_lark_refs()
+def fetch_badcases(require_snapshot_field: bool = False) -> list[dict]:
+    _init_lark_refs(require_snapshot_field=require_snapshot_field)
     result = _lark_cli(
         "base", "+record-list",
         "--base-token", MAIN_BASE_TOKEN,
@@ -217,10 +241,52 @@ def upload_snapshot_to_lark(record_id: str, snap: dict, dry_run: bool, quiet: bo
         Path(tmp_path).unlink(missing_ok=True)
 
 
+def save_snapshot_file(snap: dict, cfg: dict) -> Path:
+    validate_snapshot(snap)
+    anon = snap["resource_context"]["anonymous_id"]
+    export_dir = _snapshot_dir(cfg)
+    export_dir.mkdir(parents=True, exist_ok=True)
+    path = export_dir / f"badcase_{anon}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    path.write_text(json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def push_snapshot_to_github(snap: dict, cfg: dict, dry_run: bool, quiet: bool) -> bool:
+    validate_snapshot(snap)
+    title = issue_title(snap)
+    body = issue_body(snap)
+    labels = issue_labels(snap)
+
+    if dry_run:
+        if not quiet:
+            print("\n[dry-run] 将创建 GitHub issue")
+            print(f"[dry-run] 标题：{title}")
+            print(f"[dry-run] 标签：{', '.join(labels)}")
+            print(body)
+        return True
+
+    cmd = ["gh", "issue", "create", "--title", title, "--body", body]
+    repo = _github_repo(cfg)
+    if repo:
+        cmd += ["--repo", repo]
+    for label in labels:
+        cmd += ["--label", label]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, env=_github_env(cfg))
+    if result.returncode != 0:
+        if not quiet:
+            print(f"  ❌ GitHub issue 创建失败：{result.stderr or result.stdout}")
+        return False
+    if not quiet:
+        print(f"  ✅ GitHub issue 已创建：{result.stdout.strip()}")
+    return True
+
+
 def main():
-    parser = argparse.ArgumentParser(description="导出 Badcase 脱敏快照并上传至飞书附件")
-    parser.add_argument("--dry-run", action="store_true", help="预览，不写飞书")
+    parser = argparse.ArgumentParser(description="导出 Badcase 脱敏快照并默认创建 GitHub issue")
+    parser.add_argument("--dry-run", action="store_true", help="预览，不创建 issue、不写飞书")
     parser.add_argument("--quiet",   action="store_true", help="静默模式（定时任务用）")
+    parser.add_argument("--upload-lark", action="store_true", help="兼容旧流程：上传 snapshot 到 Lark 附件字段，不创建 GitHub issue")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -232,9 +298,10 @@ def main():
         sys.exit(0)
 
     if not args.quiet:
-        print(f"{'[DRY-RUN] ' if args.dry_run else ''}🔍 扫描飞书 Badcase 记录...")
+        target = "Lark 附件" if args.upload_lark else "GitHub issue"
+        print(f"{'[DRY-RUN] ' if args.dry_run else ''}🔍 扫描飞书 Badcase 记录，目标：{target}...")
 
-    records = fetch_badcases()
+    records = fetch_badcases(require_snapshot_field=args.upload_lark)
     if not records:
         if not args.quiet:
             print("✅ 没有待处理的 badcase 记录")
@@ -260,30 +327,40 @@ def main():
             expect = snap["badcase"]["vm_expected_result"]
             print(f"→ {rid}  状态：{status}  期望：{expect[:30]}")
 
-        ok = upload_snapshot_to_lark(rid, snap, args.dry_run, args.quiet)
+        if not args.upload_lark:
+            snapshot_path = save_snapshot_file(snap, cfg)
+            if not args.quiet:
+                print(f"  脱敏快照已保存：{snapshot_path}")
+
+        ok = (
+            upload_snapshot_to_lark(rid, snap, args.dry_run, args.quiet)
+            if args.upload_lark else
+            push_snapshot_to_github(snap, cfg, args.dry_run, args.quiet)
+        )
         if ok:
             success += 1
 
     if not args.quiet:
         if args.dry_run:
-            print(f"\n[dry-run] 完成，共 {len(records)} 条，未实际上传")
+            print(f"\n[dry-run] 完成，共 {len(records)} 条，未实际创建 issue")
             log_manual_step(
-                step_name="Badcase 快照 dry-run",
+                step_name="Badcase GitHub issue dry-run",
                 status="skipped",
                 input_summary=f"Badcase 数量: {len(records)}",
-                output_summary="已生成脱敏快照预览，未上传附件",
+                output_summary="已生成脱敏快照预览，未创建 GitHub issue",
             )
         else:
-            print(f"\n🎉 完成，{success}/{len(records)} 条快照已上传至飞书附件")
-            if success > 0:
-                print("   项目负责人可运行 push_badcase_issues.py 从飞书读取并开 GitHub issue")
+            if args.upload_lark:
+                print(f"\n完成，{success}/{len(records)} 条快照已上传至飞书附件")
+            else:
+                print(f"\n完成，{success}/{len(records)} 条 GitHub issue 已创建")
 
     if not args.dry_run:
         log_manual_step(
-            step_name="Badcase 快照上传",
+            step_name="Badcase GitHub issue 上报" if not args.upload_lark else "Badcase 快照上传",
             status="done" if success == len(records) else "failed",
             input_summary=f"Badcase 数量: {len(records)}",
-            output_summary=f"上传成功: {success}/{len(records)}",
+            output_summary=f"成功: {success}/{len(records)}",
             step_type="action" if success == len(records) else "error",
         )
 

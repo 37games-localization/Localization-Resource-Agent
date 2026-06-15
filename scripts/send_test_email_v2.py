@@ -31,7 +31,7 @@ from send_test_email import (
 def _build_subject_body(name: str, lang_pair: str, lang: str, attachment_name: str):
     """构建邮件主题和正文（不涉及文件操作）"""
     if lang == "zh":
-        subject = f"【Localization Team】翻译能力测试 - {name}"
+        subject = f"【37GAMES】翻译能力测试 - {name}"
         body = f"""您好，{name}，
 
 感谢您对本次翻译合作的兴趣！
@@ -46,9 +46,9 @@ def _build_subject_body(name: str, lang_pair: str, lang: str, attachment_name: s
 期待您的回复！
 
 此致
-Localization Team"""
+37GAMES 本地化团队"""
     else:
-        subject = f"[Localization Team] Translation Test - {name}"
+        subject = f"[37GAMES] Translation Test - {name}"
         body = f"""Dear {name},
 
 Thank you for your interest in collaborating with us!
@@ -63,7 +63,7 @@ Test details:
 We look forward to hearing from you!
 
 Best regards,
-Localization Team"""
+37GAMES Localization Team"""
     return subject, body
 
 

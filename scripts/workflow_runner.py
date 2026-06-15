@@ -11,6 +11,7 @@ workflow_runner.py
   next        自动判断下一步并执行
   score       手动触发评分写回
   test-email  手动发测试题邮件（需要 --file）
+  contract-info-email  发送签约信息收集邮件
   contract    手动生成合同
   resume      从 dialog checkpoint 恢复执行
   list        列出所有候选人及当前状态
@@ -21,6 +22,7 @@ workflow_runner.py
     python3 scripts/workflow_runner.py next --name "测试候选人A" --file ~/Downloads/test.pdf
     python3 scripts/workflow_runner.py score --name "测试候选人A"
     python3 scripts/workflow_runner.py test-email --name "测试候选人A" --file ~/test.pdf
+    python3 scripts/workflow_runner.py contract-info-email --name "测试候选人A"
     python3 scripts/workflow_runner.py contract --name "测试候选人A"
     python3 scripts/workflow_runner.py resume --token ckpt-xxx --decision "写入"
     python3 scripts/workflow_runner.py list
@@ -80,7 +82,7 @@ NEXT_STEP_HINTS = {
     "❌ 已拒绝":       "⚠️  已拒绝，无需操作",
     "📝 测试题待发":   "➡  建议：发测试题（next --file <pdf> 或 test-email --file <pdf>）",
     "📤 测试中":       "⏳  等待候选人提交测试，需人工确认测试结果",
-    "✅ 测试通过":     "➡  建议：进入合同信息收集，或直接生成合同（contract 子命令）",
+    "✅ 测试通过":     "➡  建议：发送签约信息收集邮件（contract-info-email 子命令）",
     "❌ 测试未通过":   "⚠️  测试未通过，可发婉拒邮件（send_rejection_email.py）",
     "📧 合同信息收集中": "⏳  等待候选人提供合同信息，需人工核实",
     "📄 合同待生成":   "➡  建议：生成合同（contract 子命令）",
@@ -394,7 +396,14 @@ def cmd_next(args):
             "--file", str(args.file),
         ])
 
-    elif status in ("✅ 测试通过", "📄 合同待生成"):
+    elif status == "✅ 测试通过":
+        if not ensure_schema_ready("contract-info-email"):
+            return 1
+        return run_script("send_contract_info_email_v2.py", [
+            "--record-id", record_id,
+        ])
+
+    elif status == "📄 合同待生成":
         if not ensure_schema_ready("contract"):
             return 1
         return run_script("generate_contract_v2.py", [
@@ -452,6 +461,23 @@ def cmd_test_email(args):
     extra += ["--file", str(args.file)]
 
     return run_script("send_test_email_v2.py", extra)
+
+
+def cmd_contract_info_email(args):
+    """手动发送签约信息收集邮件"""
+    if not args.name and not args.record_id:
+        print("❌ 请提供 --name 或 --record-id")
+        return 1
+    if not ensure_schema_ready("contract-info-email"):
+        return 1
+
+    extra = []
+    if args.record_id:
+        extra += ["--record-id", args.record_id]
+    elif args.name:
+        extra += ["--name", args.name]
+
+    return run_script("send_contract_info_email_v2.py", extra)
 
 
 def cmd_contract(args):
@@ -560,6 +586,7 @@ def build_parser() -> argparse.ArgumentParser:
   next+file   python3 scripts/workflow_runner.py next --name "测试候选人A" --file ~/test.pdf
   score       python3 scripts/workflow_runner.py score --name "测试候选人A"
   test-email  python3 scripts/workflow_runner.py test-email --name "测试候选人A" --file ~/test.pdf
+  contract-info-email  python3 scripts/workflow_runner.py contract-info-email --name "测试候选人A"
   contract    python3 scripts/workflow_runner.py contract --name "测试候选人A"
   resume      python3 scripts/workflow_runner.py resume --token ckpt-xxx --decision "写入"
   list        python3 scripts/workflow_runner.py list
@@ -599,6 +626,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_email.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
     p_email.add_argument("--file",      type=Path, required=True, help="测试题 PDF 路径（必填）")
 
+    # ── contract-info-email ─────────────────────────────────────────────────
+    p_contract_info = sub.add_parser("contract-info-email", help="发送签约信息收集邮件（send_contract_info_email_v2.py）")
+    p_contract_info.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_contract_info.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+
     # ── contract ─────────────────────────────────────────────────────────────
     p_contract = sub.add_parser("contract", help="手动生成合同（generate_contract_v2.py）")
     p_contract.add_argument("--name",      help="候选人姓名（模糊匹配）")
@@ -626,6 +658,7 @@ COMMAND_MAP = {
     "next":       cmd_next,
     "score":      cmd_score,
     "test-email": cmd_test_email,
+    "contract-info-email": cmd_contract_info_email,
     "contract":   cmd_contract,
     "resume":     cmd_resume,
     "list":       cmd_list,

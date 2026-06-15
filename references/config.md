@@ -10,6 +10,7 @@
 | 简历收集表 table-id | 主数据表 | `lark.resume_table_id` |
 | 合同信息表 base-token | 读取收款信息、证件、签回合同 | `lark.contract_base_token` |
 | 合同信息表 table-id | 合同信息收集表 | `lark.contract_table_id` |
+| 签约信息收集表单地址 | 发给资源商填写合同/银行/证件信息 | `lark.contract_info_form_url` |
 | 合同模板表 base-token | 读取合同模板 | `lark.template_base_token` |
 | 合同模板表 table-id | 合同模板表 | `lark.template_table_id` |
 | 飞书 App ID | bot 绑定用，找项目维护人获取 | 不写入文档 |
@@ -27,42 +28,42 @@ llm:
 
 也可以设置环境变量 `LOC_LLM_API_KEY`。skill 不会自动读取 OpenClaw provider 或 `openclaw.json`，避免静默消耗 OpenClaw 月度额度。
 
-## 关键字段 ID
+## 关键字段映射
 
-当前 Field ID 仅是现有测试表的参考。实际运行优先读取 `config/lark-field-mapping.yaml`；VM 更换 Lark 表后，先运行 `python3 scripts/schema_mapping_checkpoint.py propose --table all` 生成 checkpoint。VM 确认或描述调整后，再运行 `adjust` / `confirm` 刷新新映射。
+本仓库不保存真实 Field ID。实际运行优先读取 `config/lark-field-mapping.yaml`；VM 更换 Lark 表后，Agent 先运行 `python3 scripts/schema_mapping_checkpoint.py propose --table all` 生成 checkpoint。VM 确认或描述调整后，再运行 `adjust` / `confirm` 刷新新映射。
 
 ### 输入字段（VM 填写）
-| 字段名 | Field ID | 类型 |
-|--------|---------|------|
-| 姓名 | fldSAfsOJf | text |
-| 语言对 | fldBvHUo5K | select |
-| 简历 | fld7W0W7e2 | attachment |
-| 人工翻译单价 | fldS6L635G | number |
-| AIPE单价 | fld1S3tCII | number |
-| 报价商议空间 | fldVAMT8Pz | select |
-| 提供的服务 | fld9GdKXnB | select（多选） |
-| 项目经历 | fldaQKJa1J | text |
-| 其他相关经验 | fldjMCovnE | text |
-| 熟悉的IP | fldZZftCZ0 | text |
+| 字段名 | 映射键 | 类型 |
+|--------|--------|------|
+| 姓名 | candidate.name | text |
+| 语言对 | candidate.language_pair | select |
+| 简历 | candidate.resume | attachment |
+| 人工翻译单价 | candidate.human_price | number |
+| AIPE单价 | candidate.aipe_price | number |
+| 报价商议空间 | candidate.price_flexibility | select |
+| 提供的服务 | candidate.services | select（多选） |
+| 项目经历 | candidate.project_experience | text |
+| 其他相关经验 | candidate.other_experience | text |
+| 熟悉的IP | candidate.familiar_ips | text |
 
 ### LLM 解析字段（parse_resumes.py 写入，可手动纠正）
-| 字段名 | Field ID | 类型 | 说明 |
-|--------|---------|------|------|
-| 解析字数 | flduKRhgTV | number | 游戏翻译实际字数，手动纠正直接改这里 |
-| 解析年限 | flde0kTB3Z | number | 游戏翻译从业年限 |
-| 解析项目数 | fldfpo5X1f | number | 游戏项目数量 |
-| 解析知名实体 | fld3cWjCaA | text | 知名游戏/厂商/LSP，逗号分隔 |
-| 简历解析时间 | fldh8Ebrxl | datetime | 最后一次解析时间 |
+| 字段名 | 映射键 | 类型 | 说明 |
+|--------|--------|------|------|
+| 解析字数 | candidate.parsed_word_count | number | 游戏翻译实际字数，手动纠正直接改这里 |
+| 解析年限 | candidate.parsed_years | number | 游戏翻译从业年限 |
+| 解析项目数 | candidate.parsed_project_count | number | 游戏项目数量 |
+| 解析知名实体 | candidate.parsed_known_entities | text | 知名游戏/厂商/LSP，逗号分隔 |
+| 简历解析时间 | candidate.parsed_at | datetime | 最后一次解析时间 |
 
 ### 评分输出字段（rescore_and_write.py 写入）
-| 字段名 | Field ID | 类型 |
-|--------|---------|------|
-| 总分 | fldSAqhqXF | number |
-| 初始评级 | fldzclgjwZ | select |
-| 有效简历 | fldUNWHXoU | select |
-| 评分依据 | fldl0mRETk | text |
-| AI建议 | fldrIjaOr9 | text |
-| 招募状态 | fldfp6Pn7l | select |
+| 字段名 | 映射键 | 类型 |
+|--------|--------|------|
+| 总分 | candidate.score | number |
+| 初始评级 | candidate.rating | select |
+| 有效简历 | candidate.valid_resume | select |
+| 评分依据 | candidate.score_basis | text |
+| AI建议 | candidate.ai_suggestion | text |
+| 招募状态 | candidate.status | select |
 
 ## 评分引擎路径
 

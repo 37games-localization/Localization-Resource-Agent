@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
@@ -39,9 +38,7 @@ from schema_validator import (
 )
 
 
-CHECKPOINT_DIR = Path(
-    os.environ.get("LOC_SCHEMA_CHECKPOINT_DIR", str(Path.home() / ".loc-resume-schema-checkpoints"))
-).expanduser()
+CHECKPOINT_DIR = Path.home() / ".loc-resume-schema-checkpoints"
 
 
 def checkpoint_token() -> str:

@@ -1,8 +1,8 @@
 ---
 name: loc-resume-screening
-version: "2.7"
-updated: "2026-06-12"
-description: "本地化资源管理全流程 skill，覆盖译者简历筛选到入库的完整链路。v2 工作流可视化版：每步行动实时展示，Human Decision 节点支持对话驱动暂停-恢复。触发场景：(1) VM 首次安装配置引导；(2) 新简历入库解析评分；(3) 发测试题邮件；(4) 生成并发送合同；(5) 合同签署核查；(6) 招募状态推进；(7) 手动纠正评分；(8) 全量重算。所有操作以飞书表为单一数据源，脚本确定性执行，不依赖 AI 上下文记忆状态。"
+version: "2.8"
+updated: "2026-06-15"
+description: "本地化资源管理全流程 skill，覆盖译者简历筛选到入库的完整链路。v2 工作流可视化版：每步行动实时展示，Human Decision 节点支持对话驱动暂停-恢复。触发场景：(1) VM 首次安装配置引导；(2) 新简历入库解析评分；(3) 发测试题邮件；(4) 发送签约信息收集邮件；(5) 生成并发送合同；(6) 合同签署核查；(7) 招募状态推进；(8) 手动纠正评分；(9) 全量重算。所有操作以飞书表为单一数据源，脚本确定性执行，不依赖 AI 上下文记忆状态。"
 ---
 
 # 本地化资源管理全流程
@@ -65,12 +65,13 @@ python3 scripts/schema_mapping_checkpoint.py propose --table all --create-missin
 | `parse_resumes.py` | LLM 解析简历 PDF → 写飞书结构化字段 | 「解析简历」「新简历入库」 |
 | `rescore_and_write.py` | 确定性重算评分 → 写回飞书 | 「重跑评分」「重算评分」 |
 | `send_test_email.py` | 发测试题邮件 → 更新飞书状态 | 「发测试题给XXX」 |
+| `send_contract_info_email_v2.py` | 发送签约信息收集邮件 → 更新飞书状态 | 「给XXX发签约信息收集」「收集XXX合同信息」 |
 | `generate_contract.py` | 生成合同 docx + 发邮件 → 更新飞书 | 「给XXX生成合同」「发合同」 |
 | `check_signed_contract.py` | 核查签字合同 → 更新飞书状态 | 「XXX的合同已签字」 |
 | `send_rejection_email.py` | 发婉拒邮件（二次确认）→ 更新飞书 | 「婉拒XXX」 |
 | `update_status.py` | 手动推进招募状态 | 「把XXX状态改成XXX」 |
-| `export_badcase_snapshots.py` | VM 侧导出统一协议 badcase 脱敏快照并上传飞书 | 「导出badcase」「推送badcase」 |
-| `push_badcase_issues.py` | 项目侧读取脱敏 snapshot，按统一模板创建 GitHub issue | 项目负责人集中开 issue |
+| `export_badcase_snapshots.py` | VM 侧导出脱敏快照并默认创建 GitHub issue | 「导出badcase」「推送badcase」 |
+| `push_badcase_issues.py` | 从本地 snapshot 补推统一格式 GitHub issue | 维护补推 |
 | `schema_mapping_checkpoint.py` | 生产表准入校验：表头识别、缺列/疑似匹配/类型差异，VM 确认后保存字段映射 | 「检查这张Lark表能不能用」「更换生产表」 |
 | `schema_validator.py` | 底层只读 schema 校验引擎，供 checkpoint 使用 | 维护排查 |
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
@@ -181,6 +182,7 @@ python3 scripts/generate_contract.py --name "测试候选人B" --send
 |------|------|
 | `rescore_and_write_v2.py` | 评分写回 + 可视化，支持 `--interactive` 交互确认 |
 | `send_test_email_v2.py` | 发测试题 + 可视化，发送前有 dialog 确认 |
+| `send_contract_info_email_v2.py` | 签约信息收集邮件 + 可视化，默认生成草稿 |
 | `generate_contract_v2.py` | 生成合同 + 可视化，生成后有 dialog 确认 |
 | `workflow_runner.py` | **统一入口**，按招募状态路由到对应 v2 脚本 |
 
@@ -197,6 +199,7 @@ python3 scripts/workflow_runner.py next --name "测试候选人A" --file ~/Downl
 # 手动指定某一步
 python3 scripts/workflow_runner.py score --name "测试候选人A"
 python3 scripts/workflow_runner.py test-email --name "测试候选人A" --file ~/test.pdf
+python3 scripts/workflow_runner.py contract-info-email --name "测试候选人A"
 python3 scripts/workflow_runner.py contract --name "测试候选人A"
 
 # 恢复 dialog checkpoint
@@ -212,7 +215,8 @@ python3 scripts/workflow_runner.py list
 |------------|----------|
 | 📋 简历待筛选 / 🔍 初筛中 / ✅ 初筛通过 | `rescore_and_write_v2.py --interactive` |
 | 📝 测试题待发 | `send_test_email_v2.py --file <pdf>`（需 `--file`）|
-| ✅ 测试通过 / 📄 合同待生成 | `generate_contract_v2.py` |
+| ✅ 测试通过 | `send_contract_info_email_v2.py` |
+| 📄 合同待生成 | `generate_contract_v2.py` |
 | 其他状态 | 打印当前状态 + 人工操作说明 |
 
 ### dialog 模式工作原理
@@ -245,23 +249,24 @@ git checkout main
 
 或者直接在飞书主表「是否Badcase」列选「⚠️ 是」，可选填「期望结果」一句话说明。
 
-VM 只需要做这两件事，其余上下文收集和脱敏 snapshot 生成由系统自动处理。VM 不需要 GitHub 权限。
+VM 只需要做这两件事，其余上下文收集、脱敏 snapshot 生成和 GitHub issue 创建由系统自动处理。
 
-当前主表已具备 Badcase 回流三列：
+当前主表至少需要 Badcase 回流两列：
 - 「是否Badcase」→ `candidate.badcase_flag`
 - 「期望结果」→ `candidate.expected_result`
-- 「Badcase快照」→ `candidate.badcase_snapshot`
+
+「Badcase快照」附件列仅作为旧流程兼容字段，不再是默认上报必需字段。
 
 字段含义和当前 Field ID 见 [`references/lark-field-dictionary.md`](references/lark-field-dictionary.md)。导出脚本会从 `config/lark-field-mapping.yaml` 读取映射，不再依赖硬编码字段 ID。
 
 手动触发导出：
 
 ```bash
-python3 scripts/export_badcase_snapshots.py --dry-run  # 预览
-python3 scripts/export_badcase_snapshots.py            # 正式导出并上传飞书附件
+python3 scripts/export_badcase_snapshots.py --dry-run  # 预览 GitHub issue
+python3 scripts/export_badcase_snapshots.py            # 正式创建 GitHub issue
 ```
 
-项目负责人集中开 GitHub issue：
+如需从本地 snapshot 补推 GitHub issue：
 
 ```bash
 python3 scripts/push_badcase_issues.py --snapshot badcase_xxx.json --dry-run
@@ -270,7 +275,7 @@ python3 scripts/push_badcase_issues.py --snapshot badcase_xxx.json
 
 Badcase 回流必须遵守统一协议：
 
-- VM 侧只上传 `snapshot_version=2.0` 的脱敏 JSON。
+- VM 侧只生成 `snapshot_version=2.0` 的脱敏 JSON。
 - 项目侧只允许从 snapshot 生成 issue，不允许不同 Agent 自由拼标题和正文。
 - issue 标题、正文、label 由 `scripts/badcase_protocol.py` 统一生成。
 - snapshot 校验失败时必须跳过，不允许强行上传/开 issue。
@@ -440,6 +445,7 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
 | 「处理XXX」「帮我处理XXX」「下一步 XXX」 | 调用 `run_dialog.py score --name "XXX"`，根据招募状态自动路由 |
 | 「评分XXX」「重算XXX的分」 | 调用 `run_dialog.py score --name "XXX"` |
 | 「发测试题给XXX」 | 调用 `run_dialog.py test-email --name "XXX" --file <最近用过的附件>` |
+| 「给XXX发签约信息收集」「收集XXX合同信息」 | 调用 `run_dialog.py contract-info-email --name "XXX"` |
 | 「给XXX生成合同」「发合同给XXX」 | 调用 `run_dialog.py contract --name "XXX"` |
 | 「列出候选人」「看看现在都到哪步了」 | 调用 `workflow_runner.py list` |
 | 「XXX的状态」「XXX到哪步了」 | 调用 `workflow_runner.py status --name "XXX"` |
@@ -577,7 +583,7 @@ AI 回复：✅ 已写入飞书，李全鸿档位 S，优先录用。
 
 ### v2.3（2026-06-05）
 - ✨ 新增 badcase 回流能力：飞书主表加「是否Badcase」+「期望结果」两个字段
-- ✨ 新增 `export_badcase_snapshots.py`：脱敏快照导出并上传到飞书
+- ✨ 新增 `export_badcase_snapshots.py`：脱敏快照导出，默认创建 GitHub issue；Lark 附件上传仅作为显式兼容选项
 - ✨ 本机配置新增 `badcase_export` 和 `github` 配置块
 - 📝 onboarding 增加 badcase 使用说明
 

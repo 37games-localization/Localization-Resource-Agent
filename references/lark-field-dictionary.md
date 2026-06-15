@@ -42,7 +42,7 @@
 | `candidate.supplier_id` | 供应商编号 | 财务/供应商系统登记后的供应商编号，供资源入库和后续结算追踪。 | 写/读 | 否 | 供应商登记、财务审批、入库 |
 | `candidate.badcase_flag` | 是否Badcase | VM 标记运行结果不符合预期。 | 读/写 | 否 | Badcase 回流 |
 | `candidate.expected_result` | 期望结果 | VM 对 badcase 的一句话期望结果。 | 读/写 | 否 | Badcase 回流 |
-| `candidate.badcase_snapshot` | Badcase快照 | 自动生成的脱敏 snapshot JSON 附件。 | 写/读 | 否 | Badcase 回流 |
+| `candidate.badcase_snapshot` | Badcase快照 | 旧流程兼容字段；默认不再上传 Lark 附件，Badcase 直接创建 GitHub issue。 | 写/读 | 否 | Badcase 回流 |
 
 ## 评分规则配置表 `pricing_rules`
 
@@ -104,7 +104,7 @@
 3. 若要跑合同，必须配置合同信息表，并保留合同信息表中的必需字段。
 4. 若要覆盖合同审批/供应商入库，主表需要保留或新增：合同编号、供应商编号。
 5. 若要看板/待决策恢复，必须保留或创建 `Agent流程日志` 表。
-6. 若要 badcase 回流，必须保留：是否Badcase、期望结果、Badcase快照。
+6. 若要 badcase 回流，必须保留：是否Badcase、期望结果。Badcase快照仅为旧流程兼容字段。
 
 ## 当前 Badcase 字段映射
 
@@ -114,13 +114,13 @@
 |---|---|---|---|
 | `candidate.badcase_flag` | 是否Badcase | `flduSa1I3n` | VM 标记 `⚠️ 是` 后进入 badcase 导出队列；后续可标记 `✅ 已处理` |
 | `candidate.expected_result` | 期望结果 | `fldcqij7pB` | VM 填一句话说明“应该是什么结果” |
-| `candidate.badcase_snapshot` | Badcase快照 | `fldINLSImt` | Agent 上传脱敏 snapshot JSON 附件 |
+| `candidate.badcase_snapshot` | Badcase快照 | `fldINLSImt` | 旧流程兼容字段；默认不再上传 Lark 附件 |
 
 VM 使用方式：
 
 1. 在候选人主表把「是否Badcase」选为 `⚠️ 是`。
 2. 在「期望结果」填写一句话，例如“应该进入人工复核，不该直接婉拒”。
-3. 运行 `python3 scripts/export_badcase_snapshots.py --dry-run` 预览。
-4. 确认无误后运行 `python3 scripts/export_badcase_snapshots.py` 上传脱敏快照到「Badcase快照」。
+3. 运行 `python3 scripts/export_badcase_snapshots.py --dry-run` 预览 GitHub issue。
+4. 确认无误后运行 `python3 scripts/export_badcase_snapshots.py` 创建 GitHub issue。
 
 脚本不再硬编码这些 Field ID，会从 `config/lark-field-mapping.yaml` 读取当前映射。VM 换表后，只要重新跑 schema 校验生成映射，badcase 导出会跟随新表。

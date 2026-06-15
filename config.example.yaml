@@ -26,6 +26,7 @@ lark:
   # 合同信息收集表（资源商填写银行/证件信息）
   contract_base_token: ""        # 与简历表同 base 时可填相同值
   contract_table_id: ""
+  contract_info_form_url: ""     # 资源商填写签约/银行/证件信息的 Lark 表单地址
 
   # 合同模板表（AI 标注版模板，脚本自动从飞书下载）
   template_base_token: ""
@@ -66,6 +67,7 @@ badcase_export:
   enabled: false
   export_dir: "~/Documents/loc-agent-badcase-exports/"
   auto_mark_exported: false
+  default_target: "github_issue"
   local_salt: ""                 # 首次运行自动生成；不要提交真实值
 
 github:

@@ -1,12 +1,12 @@
 # 本地化资源管理 Agent
 
-> Localization Resource Agent · 当前版本：v2.7
+> Localization Resource Agent · 当前版本：v2.8
 
 覆盖外部译者从**投简历到正式入库**的完整招募链路，通过自然语言指令驱动，飞书多维表格作为数据中枢。当前版本已进入生产端验证闭环：单点能力可独立调用，关键节点有日志/人工确认/安全准备模式，Badcase 可回流到 GitHub issue 追踪修复。
 
 | 🔧 Skill 能力节点 | ✅ 业务节点验证 | ⚡ 自动执行节点 | 👤 固定人工介入节点 |
 |:-:|:-:|:-:|:-:|
-| 8 个 | 16 个 | 6 个 | 4 个 |
+| 9 个 | 16 个 | 7 个 | 4 个 |
 
 ---
 
@@ -16,6 +16,7 @@
 |------|---------|
 | 简历解析评分 | 「帮我解析今天新来的简历」 |
 | 发测试题邮件 | 「给 XXX 发测试题，附件在桌面」 |
+| 发签约信息收集 | 「给 XXX 发签约信息收集」 |
 | 生成合同 | 「XXX 合同信息收集好了，帮我生成合同」|
 | 合同邮件草稿 | 「帮我生成合同邮件草稿」 |
 | 核查签字合同 | 「XXX 签字版回来了，帮我核查」 |
@@ -36,7 +37,7 @@
 刚才那封邮件标成 badcase，语气太硬
 ```
 
-Agent 会按统一协议生成脱敏快照，移除真实姓名、邮箱、电话、证件、银行和合同敏感信息。配置 GitHub 权限后，可以自然语言要求 Agent 按统一模板创建 issue；没有 GitHub 权限时，也会生成可提交的 snapshot / issue 草稿。
+Agent 会按统一协议生成脱敏快照，移除真实姓名、邮箱、电话、证件、银行和合同敏感信息，并默认直接按统一模板创建 GitHub issue。Lark 附件上传不再作为默认上报链路，仅保留为显式兼容选项。
 
 ---
 
@@ -105,6 +106,15 @@ python3 scripts/start_frontend.py
 
 ## 更新日志
 
+### v2.8（2026-06-15）
+**签约信息收集邮件节点上线**
+
+- 新增 `send_contract_info_email_v2.py`：测试通过后，Agent 可生成签约信息收集邮件草稿，发送 Lark 表单链接给候选人。
+- 新增配置项 `lark.contract_info_form_url`：签约信息收集表单地址可随环境切换。
+- `workflow_runner.py next` 在「✅ 测试通过」状态下进入签约信息收集邮件节点，不再直接跳到合同生成。
+- onboarding 明确安装原则：Agent 先做到底，VM 只做最后确认；能自动处理的，不转给 VM。
+- Badcase 默认上报路径改为 GitHub issue，Lark 附件上传仅作为显式兼容选项。
+
 ### v2.7（2026-06-12）
 **本地前端工作台上线**
 
@@ -148,12 +158,12 @@ python3 scripts/start_frontend.py
 ### v2.3（2026-06-05）
 **Badcase 回流上线**
 
-- ✨ 飞书资源候选人主表新增「是否Badcase」+「期望结果」+「Badcase快照」三个字段
+- ✨ 飞书资源候选人主表新增「是否Badcase」+「期望结果」字段
   - VM 遇到问题：在飞书对应行标记「⚠️ 是」，可选填一句期望结果
   - 或直接告诉 Agent：「把这个标成 badcase，应该进人工复核」
-- ✨ 新增 `export_badcase_snapshots.py`：自动生成脱敏快照 JSON 并上传到飞书「Badcase快照」附件字段
+- ✨ 新增 `export_badcase_snapshots.py`：自动生成脱敏快照 JSON，并默认直接创建 GitHub issue
   - 脱敏处理：真实姓名/邮箱/电话/证件/银行信息全部移除，只保留匿名 ID、状态、评分摘要和 VM 期望结果
-  - **VM 不需要任何 GitHub 权限**，快照存在飞书表，由项目负责人集中拉取并开 GitHub issue
+  - Lark 附件上传仅保留为显式兼容选项：`--upload-lark`
   - 在 `config.yaml` 设置 `badcase_export.enabled: true` 后生效
 - 📝 onboarding.md 新增 Badcase 使用说明
 

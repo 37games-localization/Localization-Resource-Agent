@@ -10,6 +10,7 @@ run_dialog.py
 用法：
     python3 scripts/run_dialog.py score --name "李全鸿"
     python3 scripts/run_dialog.py test-email --name "测试候选人A" --file ~/test.pdf
+    python3 scripts/run_dialog.py contract-info-email --name "测试候选人A"
     python3 scripts/run_dialog.py contract --name "测试候选人B"
     python3 scripts/run_dialog.py resume --token ckpt-xxx --decision "写入"
 
@@ -230,7 +231,38 @@ def cmd_test_email(args):
         cmd += ["--name", args.name]
     cmd += ["--file", str(file_path)]
 
-    _run_simple(cmd, candidate)
+    _run_with_checkpoint(cmd, candidate, args)
+
+
+def cmd_contract_info_email(args):
+    """调用 send_contract_info_email_v2.py"""
+    if not args.name and not args.record_id:
+        emit_error("请提供 --name 或 --record-id")
+        return
+    if not ensure_schema_ready("contract-info-email"):
+        return
+
+    script = SCRIPTS_DIR / "send_contract_info_email_v2.py"
+    if not script.exists():
+        emit_error(f"脚本不存在：{script}，请检查路径")
+        return
+
+    record_id = args.record_id
+    candidate = args.name or args.record_id
+    if args.name and not record_id:
+        record_id, display = find_record_id(args.name)
+        if record_id is None:
+            emit_error(display)
+            return
+        candidate = display
+
+    cmd = [sys.executable, str(script)]
+    if record_id:
+        cmd += ["--record-id", record_id]
+    elif args.name:
+        cmd += ["--name", args.name]
+
+    _run_with_checkpoint(cmd, candidate, args)
 
 
 def cmd_contract(args):
@@ -442,6 +474,9 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
     if checkpoint_found:
         summary = extract_summary(raw_output)
         candidate_display = extract_candidate_from_output(raw_output, candidate)
+        options = ["写入", "跳过", "退出"]
+        if checkpoint_node and ("测试题邮件" in checkpoint_node or "签约信息收集邮件" in checkpoint_node):
+            options = ["保存草稿", "取消"]
 
         emit({
             "status":            "checkpoint",
@@ -449,7 +484,7 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
             "node":              checkpoint_node,
             "candidate":         candidate_display,
             "summary":           summary,
-            "options":           ["写入", "跳过", "退出"],
+            "options":           options,
             "raw_output":        raw_output[:2000],
         })
     else:
@@ -508,7 +543,14 @@ def _run_simple(cmd: list, candidate: str):
     candidate_display = extract_candidate_from_output(raw, candidate)
 
     # 生成成功消息
-    if "test" in str(cmd) or "email" in str(cmd).lower():
+    if "contract_info" in str(cmd) or "contract-info" in str(cmd):
+        if "草稿已保存" in raw:
+            msg = f"{candidate_display} 的签约信息收集邮件草稿已生成，等待 VM 人工检查并发送"
+        elif "📧 合同信息收集中" in raw and "人工发送" in raw:
+            msg = f"{candidate_display} 已确认人工发送签约信息收集邮件，状态已更新为合同信息收集中"
+        else:
+            msg = f"签约信息收集邮件已处理：{candidate_display}"
+    elif "test" in str(cmd) or "email" in str(cmd).lower():
         if "草稿已保存" in raw:
             msg = f"{candidate_display} 的测试题邮件草稿已生成，等待 VM 人工检查并发送"
         elif "📤 测试中" in raw and "人工发送" in raw:
@@ -546,6 +588,7 @@ def build_parser() -> argparse.ArgumentParser:
 示例：
   score       python3 scripts/run_dialog.py score --name "李全鸿"
   test-email  python3 scripts/run_dialog.py test-email --name "测试候选人A" --file ~/test.pdf
+  contract-info-email  python3 scripts/run_dialog.py contract-info-email --name "测试候选人A"
   contract    python3 scripts/run_dialog.py contract --name "测试候选人B"
   resume      python3 scripts/run_dialog.py resume --token ckpt-xxx --decision "写入"
         """,
@@ -564,6 +607,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_email.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_email.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
     p_email.add_argument("--file",      required=True, help="测试题 PDF 路径")
+
+    # contract-info-email
+    p_contract_info = sub.add_parser("contract-info-email", help="发送签约信息收集邮件")
+    p_contract_info.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_contract_info.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
 
     # contract
     p_contract = sub.add_parser("contract", help="生成合同")
@@ -585,6 +633,7 @@ def build_parser() -> argparse.ArgumentParser:
 COMMAND_MAP = {
     "score":      cmd_score,
     "test-email": cmd_test_email,
+    "contract-info-email": cmd_contract_info_email,
     "contract":   cmd_contract,
     "resume":     cmd_resume,
     "waiting":    cmd_waiting,

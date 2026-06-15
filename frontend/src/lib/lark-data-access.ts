@@ -76,7 +76,6 @@ export function getSkillConfigPath() {
   const skillRoot = getSkillRoot();
   return (
     process.env.LOC_AGENT_CONFIG ??
-    process.env.LOC_CONFIG_PATH ??
     (existsSync(`${skillRoot}/config.local.yaml`) ? `${skillRoot}/config.local.yaml` : `${skillRoot}/config.yaml`)
   );
 }
@@ -113,29 +112,6 @@ function readMappedTableConfig(tableKey: string) {
     baseToken: block.match(/^    base_token:\s*(.+)\s*$/m)?.[1]?.trim() ?? "",
     tableId: block.match(/^    table_id:\s*(.+)\s*$/m)?.[1]?.trim() ?? ""
   };
-}
-
-function readMappedFieldConfig(tableKey: string, logicalKey: string) {
-  const mappingPath = `${getSkillRoot()}/config/lark-field-mapping.yaml`;
-  if (!existsSync(mappingPath)) return { fieldId: "", fieldName: "" };
-  const text = readFileSync(mappingPath, "utf8");
-  const escapedTable = tableKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedField = logicalKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const tableMatch = text.match(new RegExp(`^  ${escapedTable}:\\s*\\n([\\s\\S]*?)(?=^  [a-zA-Z0-9_]+:\\s*$|\\Z)`, "m"));
-  const tableBlock = tableMatch?.[1] ?? "";
-  const fieldsMatch = tableBlock.match(/^    fields:\s*\n([\s\S]*?)(?=^    [a-zA-Z0-9_]+:\s*$|^  [a-zA-Z0-9_]+:\s*$|\Z)/m);
-  const fieldsBlock = fieldsMatch?.[1] ?? "";
-  const fieldMatch = fieldsBlock.match(new RegExp(`^      ${escapedField}:\\s*\\n([\\s\\S]*?)(?=^      [a-zA-Z0-9_.]+:\\s*$|\\Z)`, "m"));
-  const block = fieldMatch?.[1] ?? "";
-  return {
-    fieldId: block.match(/^        field_id:\s*(.+)\s*$/m)?.[1]?.trim() ?? "",
-    fieldName: block.match(/^        field_name:\s*(.+)\s*$/m)?.[1]?.trim() ?? ""
-  };
-}
-
-export function mappedFieldKey(tableKey: string, logicalKey: string, fallbackName: string) {
-  const field = readMappedFieldConfig(tableKey, logicalKey);
-  return field.fieldId || field.fieldName || fallbackName;
 }
 
 export function larkTableConfig(table: LarkTableKey) {

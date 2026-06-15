@@ -212,10 +212,10 @@ resources:
       - field_id: fldkpbZ4g5
         field_name: "Badcase快照"
         type: attachment
-        note: "VM agent 上传脱敏 snapshot JSON；项目负责人用 push_badcase_issues.py 读取并开 GitHub issue"
+        note: "旧流程兼容字段；默认 Badcase 直接创建 GitHub issue，不再上传 Lark 附件"
         used_by:
-          - scripts/export_badcase_snapshots.py
-        risk_if_deleted: MEDIUM
+          - scripts/export_badcase_snapshots.py --upload-lark
+        risk_if_deleted: LOW
 
 # ── 本地文件依赖 ────────────────────────────────────────────
 

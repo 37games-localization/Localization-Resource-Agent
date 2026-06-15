@@ -54,10 +54,6 @@ def main() -> int:
 
     env = os.environ.copy()
     env.setdefault("LOC_AGENT_SKILL_ROOT", str(ROOT))
-    if os.environ.get("LOC_AGENT_CONFIG") and not os.environ.get("LOC_CONFIG_PATH"):
-        env["LOC_CONFIG_PATH"] = os.environ["LOC_AGENT_CONFIG"]
-    if os.environ.get("LOC_CONFIG_PATH") and not os.environ.get("LOC_AGENT_CONFIG"):
-        env["LOC_AGENT_CONFIG"] = os.environ["LOC_CONFIG_PATH"]
     env.setdefault("PORT", str(port))
 
     print("启动资源管理 Agent 工作台...")

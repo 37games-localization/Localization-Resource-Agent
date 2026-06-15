@@ -197,6 +197,8 @@ def validate_config(cfg: dict) -> list[str]:
         issues.append("生产模式必须填写 pricing_rules.base_token/table_id（或兼容旧配置 lark.rules_table_id）")
     if not lark.get("contract_table_id"):
         issues.append("lark.contract_table_id 未填写")
+    if not lark.get("contract_info_form_url") and not lark.get("contract_form_url"):
+        issues.append("lark.contract_info_form_url 未填写（签约信息收集表单地址）")
 
     if is_test_mode(cfg) and not get_test_email(cfg):
         issues.append("test_mode.enabled=true 但 test_email 未填写")

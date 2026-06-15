@@ -2,7 +2,7 @@
 
 ## 概览
 
-本文档是给 Agent 执行安装引导用的，不是让 VM 自己照着命令清单处理。
+本文档是给 Agent 执行安装引导用的，不是让 VM 自己照着命令清单处理。核心原则是：Agent 先做到底，VM 只做最后确认；能自动处理的，不要转给 VM。仅当 Agent 无法处理外部授权、组织权限或账号安全验证时，才提醒 VM 人工处理最小必要动作。
 
 VM 安装完成后，只需要对 OpenClaw 说：
 
@@ -107,6 +107,7 @@ lark:
   # 合同信息收集表（资源商填写银行/证件信息）
   contract_base_token: "你的合同信息表 base token"
   contract_table_id: "你的合同信息表 table id"
+  contract_info_form_url: "你的签约信息收集 Lark 表单地址"
 
   # 合同模板表（AI标注版模板，脚本自动下载，无需本地维护）
   template_base_token: "你的合同模板表 base token"
@@ -223,8 +224,9 @@ python3 scripts/start_frontend.py
 1. **简历解析**：找一条已有记录，解析 PDF，看结果是否合理
 2. **评分重算**：重算该记录评分，确认写回飞书
 3. **测试题发送**：选一个候选人，把测试题发到 TEST_MODE 邮箱
-4. **合同生成**：选一个合同信息完整的记录，生成 docx，并在 TEST_MODE 下验证邮件内容
-5. **状态推进**：手动推进一条记录状态，确认飞书更新
+4. **签约信息收集**：测试通过后，给候选人生成签约信息收集邮件草稿，确认表单链接正确
+5. **合同生成**：选一个合同信息完整的记录，生成 docx，并在 TEST_MODE 下验证邮件内容
+6. **状态推进**：手动推进一条记录状态，确认飞书更新
 
 Agent 每步都要展示：本步骤读了什么输入、调用了哪个脚本、输出了什么、是否写回 Lark、是否需要 VM 人工确认。每步确认无误后继续下一步。
 
@@ -265,9 +267,9 @@ test_mode:
 - 「**是否Badcase**」列 → 选「⚠️ 是」
 - 「**期望结果**」列 → 写一句话（可不填）
 
-没有别的了。上下文、运行日志、评分明细由系统自动收集，导出为统一协议的脱敏 snapshot JSON，并上传到飞书「Badcase快照」附件字段。GitHub issue 由项目负责人集中读取 snapshot 后创建，VM 不需要 GitHub 权限。
+没有别的了。上下文、运行日志、评分明细由系统自动收集，导出为统一协议的脱敏 snapshot JSON，并默认直接创建 GitHub issue。Lark 附件上传不再作为默认链路。
 
-Agent 内部会按统一协议生成脱敏快照，VM 不需要理解 GitHub issue 格式，也不需要 GitHub 权限。
+Agent 内部会按统一协议生成脱敏快照和 GitHub issue，VM 不需要理解 issue 格式。
 
 脱敏快照不得包含真实姓名、邮箱、电话、证件号、银行账号、原始简历全文、合同正文、API key、SMTP 密码、Lark/GitHub token。脱敏校验失败时，Agent 必须停止上报并告诉 VM 需要项目维护者处理。
 
@@ -282,6 +284,7 @@ Agent 会在 `config.local.yaml` 中设置：
 ```yaml
 badcase_export:
   enabled: true
+  default_target: "github_issue"
 ```
 
 ---
@@ -293,6 +296,7 @@ badcase_export:
 - 「帮我解析新来的简历」
 - 「给测试候选人A重跑评分」
 - 「给 测试候选人A 发测试题，附件在桌面的 test.pdf」
+- 「给测试候选人A发签约信息收集」
 - 「测试候选人B的合同信息已收集，帮我生成合同发给她」
 - 「把测试候选人A的状态改成合同已发送」
 - 「全量重算一下所有人的评分」

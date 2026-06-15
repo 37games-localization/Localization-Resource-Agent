@@ -128,7 +128,7 @@ type BusinessResult =
   | { status: "success"; reason?: string; error_type?: string }
   | { status: "failed" | "partial_failed"; reason: string; error_type: string; next: string };
 
-function analyzeBusinessResult(outputText: string, action: string): BusinessResult {
+function analyzeBusinessResult(outputText: string): BusinessResult {
   const normalized = outputText.replace(/\r/g, "");
 
   const summary =
@@ -169,24 +169,6 @@ function analyzeBusinessResult(outputText: string, action: string): BusinessResu
         error_type: errorType,
         next: "请根据失败信号修复配置、LLM key、Lark 映射或候选人定位后重试。"
       };
-    }
-  }
-
-  if (action === "signed-contract-check") {
-    const signedContractFailurePatterns: Array<[RegExp, string]> = [
-      [/发现\s*\d+\s*个关键字段不一致或未匹配|签回文件不应进入状态更新/i, "signed_contract_diff_failed"],
-      [/格式检查：\s*⚠️|格式或字段 diff 未通过/i, "signed_contract_check_failed"],
-      [/分析失败|无 Lark 合同信息，无法自动 diff|未能抽取合同文本，无法自动 diff/i, "signed_contract_requires_manual_review"]
-    ];
-    for (const [pattern, errorType] of signedContractFailurePatterns) {
-      if (pattern.test(normalized)) {
-        return {
-          status: "failed",
-          reason: "签字合同核查输出包含不一致、格式问题或无法自动核查信号，不能按成功流程继续。",
-          error_type: errorType,
-          next: "请 VM 人工核对签回合同、Lark 合同信息和附件后再重试；系统不会生成成功 checkpoint 或推进状态。"
-        };
-      }
     }
   }
 
@@ -244,11 +226,11 @@ function buildCheckpointPayload(
     const dryRun = isDryRun || outputText.includes("[DRY-RUN]");
 
     return {
-      title: dryRun ? "合同信息与模板待确认" : "合同草稿待确认",
+      title: "合同草稿待确认",
       detail:
         `${candidateName ?? "该候选人"} 的合同信息已完成 dry-run 检查：使用合同信息表 record_id=${contractRecordId}。\n` +
         `已选择模板「${selectedTemplate}」，变量填充 ${filledVars}/${requiredVars}。${bankNameWarning ? `风险提示：${bankNameWarning}。` : ""}\n` +
-        `${dryRun ? "当前是 dry-run，未生成文件、未发送邮件、未写回飞书。" : "当前已执行合同生成动作。"} VM 确认后，正式流程会生成合同草稿/预览，并写入 workflow_log；合同 docx 不回传 Lark，发送合同仍需人工确认。`,
+        `${dryRun ? "当前是 dry-run，未生成文件、未发送邮件、未写回飞书。" : "当前已执行合同生成动作。"} VM 确认后，正式流程会生成合同草稿/预览，并写入 workflow_log；发送合同仍需人工确认。`,
       required: true,
       summary: {
         run_id: runId,
@@ -264,7 +246,7 @@ function buildCheckpointPayload(
         dry_run: dryRun,
         contract_file_generated: !dryRun
       },
-      writeback_fields_after_confirm: ["workflow_log", "合同编号/签约状态（后续节点）"]
+      writeback_fields_after_confirm: ["合同草稿文件", "workflow_log"]
     };
   }
 
@@ -481,7 +463,6 @@ export async function POST(request: NextRequest) {
         cwd: process.env.LOC_AGENT_SKILL_ROOT ?? `${process.env.HOME || "~"}/.agents/skills/loc-resume-screening`,
         env: {
           ...process.env,
-          LOC_CONFIG_PATH: process.env.LOC_CONFIG_PATH || process.env.LOC_AGENT_CONFIG || "",
           PYTHONUNBUFFERED: "1"
         }
       });
@@ -508,7 +489,7 @@ export async function POST(request: NextRequest) {
 
       child.on("close", (code) => {
         const outputText = outputChunks.join("");
-        const businessResult = analyzeBusinessResult(outputText, plan.action);
+        const businessResult = analyzeBusinessResult(outputText);
         send(
           event(
             "usage_report",

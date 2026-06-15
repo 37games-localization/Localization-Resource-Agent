@@ -87,7 +87,7 @@ def update_record(record_id, fields):
 # ── 邮件构建 ──────────────────────────────────────────────────────────────────
 def build_rejection_email(name: str, lang: str) -> tuple[str, str]:
     if lang == "zh":
-        subject = f"【Localization Team】感谢您的申请 - {name}"
+        subject = f"【37GAMES】感谢您的申请 - {name}"
         body = f"""您好，{name}，
 
 感谢您对本次翻译合作机会的关注，以及您所投入的时间和精力。
@@ -99,9 +99,9 @@ def build_rejection_email(name: str, lang: str) -> tuple[str, str]:
 再次感谢您的申请，祝您一切顺利！
 
 此致
-Localization Team"""
+37GAMES 本地化团队"""
     else:
-        subject = f"[Localization Team] Thank You for Your Application - {name}"
+        subject = f"[37GAMES] Thank You for Your Application - {name}"
         body = f"""Dear {name},
 
 Thank you for your interest in collaborating with us and for the time and effort you invested in your application.
@@ -113,7 +113,7 @@ This is in no way a reflection of your abilities. Should a suitable opportunity 
 Thank you again for applying, and we wish you all the best!
 
 Best regards,
-Localization Team"""
+37GAMES Localization Team"""
     return subject, body
 
 # ── 发送邮件 ──────────────────────────────────────────────────────────────────

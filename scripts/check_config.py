@@ -389,7 +389,7 @@ def main():
         print()
         print("  开启后，在飞书主表对候选人标记「⚠️ 是」即可回流 badcase，")
         print("  或者直接告诉 Agent 「把 XXX 标成 badcase」。")
-        print("  系统自动收集上下文并在 GitHub 开 issue，无需 VM 手动整理。")
+        print("  系统默认直接创建 GitHub issue；Lark 附件上传仅作为显式兼容选项。")
     else:
         all_ok = True
         for item, ok, msg in bc_results:

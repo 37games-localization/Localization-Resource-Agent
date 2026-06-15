@@ -1062,71 +1062,26 @@ function ModeSwitch({
   );
 }
 
-function SchemaMappingRow({
-  actualFields,
-  defaultValue,
-  itemKey,
-  label,
-  meta,
-  onChange,
-  value
-}: {
-  actualFields: Array<{ field_id: string; field_name: string; type: string }>;
-  defaultValue?: string;
-  itemKey: string;
-  label: string;
-  meta: string;
-  onChange: (value: string) => void;
-  value: string;
-}) {
-  return (
-    <div className="schema-mapping-row">
-      <div>
-        <code>{itemKey}</code>
-        <strong>{label}</strong>
-        <span>{meta}</span>
-      </div>
-      <select aria-label={`${itemKey} 字段映射`} onChange={(event) => onChange(event.target.value)} value={value}>
-        <option value="">{defaultValue ? `保留当前建议：${defaultValue}` : "选择当前 Lark 字段"}</option>
-        {actualFields.map((field) => (
-          <option key={field.field_id} value={field.field_name}>
-            {field.field_name} · {field.type}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 function ConfigView({ config, configSource }: { config: LarkConfigPayload | null; configSource: string }) {
   const [schemaCheckpoint, setSchemaCheckpoint] = useState<SchemaCheckpointPayload | null>(null);
   const [schemaNote, setSchemaNote] = useState("");
-  const [schemaOverrides, setSchemaOverrides] = useState<Record<string, string>>({});
   const [schemaBusy, setSchemaBusy] = useState(false);
   const [schemaMessage, setSchemaMessage] = useState("");
   const schemaMissingCount = schemaCheckpoint?.tables?.reduce((sum, table) => sum + table.missing.length, 0) ?? 0;
-  const schemaHardFailureCount = schemaCheckpoint?.hard_failures?.length ?? 0;
-  const selectedOverrideItems = Object.entries(schemaOverrides).filter(([, value]) => value.trim());
 
   const runSchemaAction = async (action: "propose" | "adjust" | "confirm", createMissingFields = false) => {
     setSchemaBusy(true);
     setSchemaMessage("");
     try {
-      const overrideSets = selectedOverrideItems.map(([logicalKey, fieldName]) => `${logicalKey}=${fieldName}`);
       const payload = await runSchemaCheckpoint({
         action,
         createMissingFields,
         note: action === "adjust" ? schemaNote : undefined,
-        set: action === "adjust" ? overrideSets : undefined,
         table: "all",
         ...(action === "propose" ? {} : { ["token"]: schemaCheckpoint?.checkpoint_token })
       });
       setSchemaCheckpoint(payload);
-      if (action === "propose") setSchemaOverrides({});
-      if (action === "adjust") {
-        setSchemaNote("");
-        setSchemaOverrides({});
-      }
+      if (action === "adjust") setSchemaNote("");
       setSchemaMessage(payload.message || (action === "confirm" ? "字段映射已确认保存。" : "字段映射 checkpoint 已生成。"));
     } catch (error) {
       setSchemaMessage(error instanceof Error ? error.message : "字段映射 checkpoint 执行失败");
@@ -1156,7 +1111,7 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
           <div>
             <span>SCHEMA CHECKPOINT</span>
             <h2>换表前字段映射确认</h2>
-            <p>Agent 会读取当前 Lark 表头，生成字段映射建议。VM 可在下方逐项调整；确认后才会保存映射并允许业务节点继续。</p>
+            <p>Agent 会读取当前 Lark 表头，生成字段映射建议。VM 确认后才会保存映射；如需调整，可以用自然语言说明。</p>
           </div>
           <strong className={`schema-status ${schemaCheckpoint?.status || "idle"}`}>
             {schemaCheckpoint?.status || "未检查"}
@@ -1169,31 +1124,22 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
           <button
             disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token || schemaMissingCount === 0}
             onClick={() => runSchemaAction("propose", true)}
-            title="确认需要新增缺失列后再点击；Agent 会补列并重新生成 checkpoint 供 VM 再次确认。"
+            title="先检查字段映射并核对缺失字段清单，确认需要新增后再点击。"
             type="button"
           >
             确认新增缺失列并重新检查
           </button>
-          <button
-            disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token || schemaHardFailureCount > 0}
-            onClick={() => runSchemaAction("confirm")}
-            title={schemaHardFailureCount > 0 ? "仍有必需字段缺口或类型错误，不能保存映射" : "保存当前 checkpoint 映射"}
-            type="button"
-          >
+          <button disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token} onClick={() => runSchemaAction("confirm")} type="button">
             确认保存映射
           </button>
         </div>
         <div className="schema-adjust-row">
           <textarea
             onChange={(event) => setSchemaNote(event.target.value)}
-            placeholder="可选补充说明，例如：这张表把简历附件改名为 CV；把 candidate.resume 映射到 CV"
+            placeholder="例如：把 candidate.resume 映射到 简历附件；将 contract.email 改成 常用工作邮箱"
             value={schemaNote}
           />
-          <button
-            disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token || (!schemaNote.trim() && selectedOverrideItems.length === 0)}
-            onClick={() => runSchemaAction("adjust")}
-            type="button"
-          >
+          <button disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token || !schemaNote.trim()} onClick={() => runSchemaAction("adjust")} type="button">
             提交调整
           </button>
         </div>
@@ -1225,16 +1171,9 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
                     <div className="schema-mini-list">
                       <h3>需要 VM 确认的疑似映射</h3>
                       {table.fuzzy.slice(0, 10).map((item) => (
-                        <SchemaMappingRow
-                          actualFields={table.actual_fields ?? []}
-                          defaultValue={item.field_name}
-                          itemKey={item.logical_key}
-                          key={`${table.table_key}-${item.logical_key}`}
-                          label={`${item.logical_key} / ${item.expected_name}`}
-                          meta={`当前建议：${item.field_name} / score=${item.score}`}
-                          onChange={(value) => setSchemaOverrides((prev) => ({ ...prev, [item.logical_key]: value }))}
-                          value={schemaOverrides[item.logical_key] ?? ""}
-                        />
+                        <p key={`${table.table_key}-${item.logical_key}`}>
+                          <code>{item.logical_key}</code> → {item.field_name} <span>score={item.score}</span>
+                        </p>
                       ))}
                     </div>
                   )}
@@ -1242,24 +1181,8 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
                     <div className="schema-mini-list">
                       <h3>缺失字段</h3>
                       {table.missing.slice(0, 10).map((item) => (
-                        <SchemaMappingRow
-                          actualFields={table.actual_fields ?? []}
-                          itemKey={item.logical_key}
-                          key={`${table.table_key}-${item.logical_key}`}
-                          label={`${item.logical_key} / ${item.expected_name}`}
-                          meta={item.required ? "必需字段：可先选择现有字段，或确认新增缺失列" : "建议字段：可选择现有字段，或确认新增缺失列"}
-                          onChange={(value) => setSchemaOverrides((prev) => ({ ...prev, [item.logical_key]: value }))}
-                          value={schemaOverrides[item.logical_key] ?? ""}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {table.type_mismatches.length > 0 && (
-                    <div className="schema-mini-list schema-type-mismatch">
-                      <h3>类型不匹配</h3>
-                      {table.type_mismatches.slice(0, 10).map((item) => (
                         <p key={`${table.table_key}-${item.logical_key}`}>
-                          <code>{item.logical_key}</code> 当前「{item.field_name}」类型 {item.actual_type}，期望 {item.expected_type}
+                          <code>{item.logical_key}</code> / {item.expected_name} / {item.required ? "必需" : "建议"}
                         </p>
                       ))}
                     </div>

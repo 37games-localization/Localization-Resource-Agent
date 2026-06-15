@@ -16,7 +16,16 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_loader import load_config, get_table_ref
+from config_loader import load_config, get_lark
+
+
+def _get_nested(config: dict, dotted_key: str) -> str:
+    cur = config
+    for part in dotted_key.split("."):
+        if not isinstance(cur, dict):
+            return ""
+        cur = cur.get(part, "")
+    return cur or ""
 
 
 def _load_required_schema() -> dict:
@@ -51,12 +60,17 @@ def resolve_table_from_config(table_key: str) -> tuple[str, str]:
         raise RuntimeError(f"required schema 中不存在表：{table_key}")
 
     cfg = load_config()
-    base_token, table_id = get_table_ref(cfg, table_key)
+    keys = table.get("config_keys", {})
+    base_token = _get_nested(cfg, keys.get("base_token", ""))
+    table_id = _get_nested(cfg, keys.get("table_id", ""))
 
     if table_key == "workflow_log" and not table_id:
         mapped_base, mapped_table = _table_ref_from_mapping(table_key)
         base_token = mapped_base or base_token
         table_id = mapped_table or table_id
+
+    if not base_token and table_key == "contract_info":
+        base_token = get_lark(cfg).get("base_token", "")
 
     if not base_token or not table_id:
         raise RuntimeError(f"{table_key} 缺少 base_token/table_id 配置")

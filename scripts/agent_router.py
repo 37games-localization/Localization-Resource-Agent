@@ -42,6 +42,7 @@ NON_RESOURCE_KEYWORDS = (
 STEP_PATTERNS = {
     "score": ("看简历", "简历", "评分", "初筛", "重算"),
     "test-email": ("测试题", "测试邀请", "发测试", "测试邮件"),
+    "contract-info-email": ("签约信息", "合同信息收集", "签约信息收集", "收集合同信息"),
     "contract": ("生成合同", "准备合同", "发合同", "签约邀请", "合同"),
     "signed-contract": ("签字合同", "签署合同", "已签字", "已签署", "核查签字"),
     "status": ("状态", "推进", "改成", "标记为"),
@@ -51,6 +52,7 @@ STEP_PATTERNS = {
 STEP_REQUIRED_INPUTS = {
     "score": ("candidate",),
     "test-email": ("candidate", "attachment"),
+    "contract-info-email": ("candidate",),
     "contract": ("candidate",),
     "signed-contract": ("candidate", "attachment"),
     "status": ("candidate", "target_status"),

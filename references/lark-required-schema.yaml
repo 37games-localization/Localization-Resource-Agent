@@ -214,7 +214,8 @@ tables:
         aliases: ["Badcase Snapshot", "脱敏快照"]
         type: attachment
         required: false
-        create_if_missing: true
+        create_if_missing: false
+        note: "旧流程兼容字段；默认 Badcase 直接创建 GitHub issue，不自动创建 Lark 附件列。"
 
   pricing_rules:
     desc: "评分规则配置表：各语言对 AIPE/人工翻译价格阈值，生产评分价格维度的唯一来源"

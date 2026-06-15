@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from config_loader import get_table_ref, is_test_mode, load_config
+from config_loader import get_lark, is_test_mode, load_config
 from lark_cli_utils import normalize_record_list_response, run_lark_cli_json
 
 LOCAL_RULES_PATH = Path(__file__).parent.parent / "config" / "resume_screening_rules_v2.json"
@@ -69,49 +69,13 @@ def as_float(value: Any, field_name: str, lang_pair: str) -> float:
 
 def normalize_rule_key(raw: Any) -> str:
     text = extract_text(raw)
-    text = (
-        text.replace("＞", ">")
+    return (
+        text.replace(" ", "")
+        .replace("＞", ">")
         .replace("→", ">")
         .replace("－", "-")
-        .replace("到", ">")
         .strip()
     )
-    if ">" not in text:
-        return text.replace(" ", "")
-    src, tgt = text.split(">", 1)
-    return f"{normalize_lang_token(src)}>{normalize_lang_token(tgt)}"
-
-
-def normalize_lang_token(raw: Any) -> str:
-    text = extract_text(raw).strip().lower()
-    compact = text.replace(" ", "")
-    aliases = [
-        ("zh-CN", ("zh-cn", "简中", "简体中文", "中文", "chinese", "simplifiedchinese")),
-        ("en", ("en", "英语", "英文", "english")),
-        ("ja", ("ja", "日语", "日文", "japanese")),
-        ("ko", ("ko", "韩语", "韩文", "korean")),
-        ("vi", ("vi", "越南语", "vietnamese")),
-        ("th", ("th", "泰语", "thai")),
-        ("id", ("id", "印尼语", "indonesian")),
-        ("ms", ("ms", "马来语", "malay")),
-        ("ar", ("ar", "阿拉伯语", "arabic")),
-        ("ru", ("ru", "俄语", "russian")),
-        ("de", ("de", "德语", "german")),
-        ("fr", ("fr", "法语", "french")),
-        ("it", ("it", "意大利语", "italian")),
-        ("es", ("es", "西班牙语", "spanish")),
-        ("pt", ("pt", "葡萄牙语", "portuguese")),
-        ("pl", ("pl", "波兰语", "polish")),
-        ("nl", ("nl", "荷兰语", "dutch")),
-        ("tr", ("tr", "土耳其语", "turkish")),
-    ]
-    for code, names in aliases:
-        if compact == code.lower() or any(compact == name or compact.startswith(name) for name in names):
-            return code
-    for code, names in aliases:
-        if any(name in compact for name in names):
-            return code
-    return compact
 
 
 def is_enabled(fields: dict) -> bool:
@@ -149,10 +113,7 @@ def load_packaged_price_rules() -> dict:
 
 def load_lark_price_rules(base_token: str, table_id: str) -> dict:
     if not base_token or not table_id:
-        raise PricingRulesError(
-            "缺少 Lark 评分规则配置表：请填写 pricing_rules.base_token/table_id"
-            "（或兼容旧配置 lark.base_token + lark.rules_table_id）"
-        )
+        raise PricingRulesError("缺少 Lark 评分规则配置表：请填写 lark.base_token 和 lark.rules_table_id")
 
     resp = run_lark_cli_json(
         "base", "+record-list",
@@ -191,14 +152,14 @@ def load_price_rules(
     require_lark_rules: bool | None = None,
 ) -> tuple[dict, dict]:
     cfg = load_config()
-    rules_base_token, rules_table_id = get_table_ref(cfg, "pricing_rules")
+    lark = get_lark(cfg)
     require_lark = (not is_test_mode(cfg)) if require_lark_rules is None else require_lark_rules
 
     try:
-        rules = load_lark_price_rules(rules_base_token, rules_table_id)
+        rules = load_lark_price_rules(lark.get("base_token", ""), lark.get("rules_table_id", ""))
         return rules, {
             "source": "lark",
-            "table_id": rules_table_id,
+            "table_id": lark.get("rules_table_id", ""),
             "count": len(rules),
         }
     except PricingRulesError as exc:
