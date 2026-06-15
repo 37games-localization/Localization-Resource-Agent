@@ -25,7 +25,15 @@ pip3 install pymupdf anthropic pyyaml python-docx
 lark-cli config bind --source openclaw --identity bot-only
 ```
 
-App ID 找 penny 获取（共用同一个 bot）。
+App ID / App Secret 请向当前项目管理员获取。
+
+如果 VM 使用新的 Lark bot，需要先在 Lark 开发者后台申请并发布权限。最小权限包括：
+- Base / 多维表格读取：`base:app:read`、`base:table:read`、`base:field:read`、`base:record:read`
+- 字段自动补齐：`base:field:create`
+- 评分、状态和日志写回：`base:record:update`、`base:record:create`
+- 简历和合同模板附件下载：`docs:document.media:download`
+
+验证环境可以先开通 Base / 多维表格相关读写权限，减少反复授权；生产环境再按 `check_config.py` 的提示收敛到最小权限。
 
 ---
 
@@ -33,7 +41,7 @@ App ID 找 penny 获取（共用同一个 bot）。
 
 合同模板存储在**飞书合同模板汇总表**，脚本自动从飞书下载，**不需要在本地维护模板文件**。
 
-确认 bot 有权限访问以下两张飞书表（找 penny 确认）：
+确认 bot 有权限访问以下两张飞书表：
 - 合同模板表（base-token: 如实填入 `config.local.yaml` 中的 `lark.template_base_token`）
 - 合同信息收集表（base-token: `lark.contract_base_token`）
 
@@ -201,7 +209,7 @@ test_mode:
   enabled: false    # ← 改为 false
 ```
 
-同时把 `lark.base_token` 等换成生产表的值（找 penny 获取）。
+同时把 `lark.base_token` 等换成生产表的值。
 
 **正式启用后，所有邮件会发到真实资源商，请确认无误再切换。**
 
@@ -290,7 +298,7 @@ pip3 install pyyaml
 
 **Q: 飞书权限报错**
 - 确认已用 bot 身份绑定 lark-cli
-- 确认 bot 在目标表格有管理员权限（找 penny 确认）
+- 确认 bot 在目标表格有管理员权限
 
 **Q: LLM api_key 找不到**
 - 在 config.local.yaml 的 `llm.api_key` 里直接填

@@ -66,7 +66,7 @@ python3 ~/.agents/skills/loc-resume-screening/scripts/parse_resumes.py \
 lark-cli config bind --source openclaw --identity bot-only
 ```
 
-飞书 App 信息（找 penny 获取）：
+飞书 App 信息：
 - App ID：由项目维护人提供，不写入 skill 包
 
 ## 第四步：确认可用
@@ -117,7 +117,7 @@ pip3 install anthropic
 
 **Q: lark-cli 报权限错误**
 - 确认已用 bot 身份绑定，且 bot 是表格管理员
-- 找 penny 确认 bot 权限
+- 联系项目维护者确认 bot 权限
 
 **Q: API Key 读取失败**
 - 设置环境变量 `export LOC_LLM_API_KEY="你的key"`

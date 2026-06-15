@@ -44,14 +44,13 @@ from send_test_email import (
     lark_cli, extract_text, BASE_TOKEN, TABLE_ID,
 )
 from rescore_and_write import fetch_all_records
-from config_loader import load_config, get_lark
+from config_loader import get_table_ref, load_config, get_lark
 from schema_gate import assert_schema_ready
 try:
-    from field_resolver import load_field_mapping, get_table_mapping, table_ref
+    from field_resolver import load_field_mapping, get_table_mapping
 except Exception:
     load_field_mapping = None
     get_table_mapping = None
-    table_ref = None
 
 # ── 招募状态常量 ──────────────────────────────────────────────────────────────
 STATUS_LABELS = [
@@ -268,16 +267,7 @@ def _checkpoint_token_from_fields(fields: dict, mapping: dict) -> str:
 def fetch_waiting_checkpoints(limit: int = 50) -> list[dict]:
     """从流程日志表读取 status=waiting 的 checkpoint 行"""
     cfg = load_config()
-    lark = get_lark(cfg)
-    base_token = lark.get("base_token", "")
-    log_table_id = lark.get("log_table_id", "<workflow_log_table_id>")
-    if table_ref:
-        try:
-            mapped_base, mapped_table = table_ref("workflow_log")
-            base_token = mapped_base or base_token
-            log_table_id = mapped_table or log_table_id
-        except Exception:
-            pass
+    base_token, log_table_id = get_table_ref(cfg, "workflow_log")
     if not base_token:
         raise RuntimeError("lark.base_token 未配置")
 

@@ -268,7 +268,7 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
       ],
       checkpointAfterSuccess: {
         title: "合同草稿确认",
-        detail: "合同生成已完成 dry-run。生产流程中只生成草稿/预览，不自动发送。"
+        detail: "合同生成节点会在本地生成草稿/预览，不自动发送，也不把 docx 回传到 Lark；后续以合同编号和签约状态继续追踪。"
       }
     };
   }

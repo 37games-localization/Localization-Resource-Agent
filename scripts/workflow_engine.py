@@ -27,11 +27,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_lark
 try:
-    from field_resolver import load_field_mapping, get_table_mapping, table_ref
+    from field_resolver import load_field_mapping, get_table_mapping
 except Exception:
     load_field_mapping = None
     get_table_mapping = None
-    table_ref = None
 
 # ── 步骤类型 ──────────────────────────────────────────────────────────────────
 class StepType:
@@ -234,10 +233,17 @@ class WorkflowEngine:
             except Exception:
                 return ""
             data = payload.get("data", payload)
+            record = data.get("record") or {}
+            record_ids = (
+                data.get("record_id_list")
+                or record.get("record_id_list")
+                or []
+            )
             record_id = (
                 data.get("record_id")
-                or data.get("record", {}).get("record_id")
-                or data.get("record", {}).get("id")
+                or record.get("record_id")
+                or (record_ids[0] if record_ids else "")
+                or record.get("id")
                 or data.get("id", "")
             )
             return record_id or ""
@@ -317,14 +323,17 @@ class WorkflowEngine:
         self._apply_workflow_table_mapping()
 
     def _apply_workflow_table_mapping(self):
-        """若字段映射包含 workflow_log 表引用，优先使用映射中的 base/table。"""
-        if not table_ref:
-            return
+        """Keep the current config as the workflow-log table source.
+
+        Field mappings may come from lark-field-mapping.yaml, but the table
+        address must follow the active config so VM table switches do not log
+        into an older confirmed Base.
+        """
         try:
-            base_token, table_id = table_ref("workflow_log")
-            if base_token and table_id:
-                self._lark_base = base_token
-                self._lark_log_tbl = table_id
+            cfg = load_config()
+            lark = get_lark(cfg)
+            self._lark_base = lark.get("log_base_token") or lark.get("base_token", "")
+            self._lark_log_tbl = lark.get("log_table_id", "")
         except Exception:
             pass
 
@@ -742,7 +751,7 @@ if __name__ == "__main__":
     engine.trace("读取简历", input_summary="test.pdf", output_summary="文本提取成功，4 页")
 
     with engine.step("调用评分引擎", input_summary="语言对 EN→ZH，经验 3 年") as s:
-        time.sleep(0.3)  # 模拟耗时
+        time.sleep(0.3)  # self-check pause
         s.finish(output="总分 82，初始评级 B+")
 
     with engine.step("生成 AI 建议", input_summary="评分结果") as s:

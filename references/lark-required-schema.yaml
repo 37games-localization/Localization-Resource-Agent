@@ -189,12 +189,6 @@ tables:
         type: text
         required: false
         create_if_missing: true
-      - key: candidate.generated_contract
-        name: "生成合同附件"
-        aliases: ["合同附件", "生成合同", "Generated contract"]
-        type: attachment
-        required: false
-        create_if_missing: true
       - key: candidate.supplier_id
         name: "供应商编号"
         aliases: ["供应商ID", "Vendor ID", "Supplier ID"]

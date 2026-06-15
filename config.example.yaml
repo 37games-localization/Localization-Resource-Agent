@@ -40,6 +40,13 @@ pricing_rules:
 paths:
   contract_output: "~/Documents/loc-contracts/output/"
 
+contract_defaults:
+  # 合同模板里的固定/常用变量。真实值请填到 config.local.yaml，不要提交。
+  # 不填写「合同生效日期」时，脚本默认使用签署日期。
+  "甲方联系人姓名": ""
+  "甲方邮箱": ""
+  "提前终止通知天数": "30"
+
 llm:
   # provider 可选：anthropic / deepseek / openai_compatible
   provider: "anthropic"

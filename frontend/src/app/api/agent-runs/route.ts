@@ -230,7 +230,7 @@ function buildCheckpointPayload(
       detail:
         `${candidateName ?? "该候选人"} 的合同信息已完成 dry-run 检查：使用合同信息表 record_id=${contractRecordId}。\n` +
         `已选择模板「${selectedTemplate}」，变量填充 ${filledVars}/${requiredVars}。${bankNameWarning ? `风险提示：${bankNameWarning}。` : ""}\n` +
-        `${dryRun ? "当前是 dry-run，未生成文件、未发送邮件、未写回飞书。" : "当前已执行合同生成动作。"} VM 确认后，正式流程会生成合同草稿/预览，并写入 workflow_log；发送合同仍需人工确认。`,
+        `${dryRun ? "当前是 dry-run，未生成文件、未发送邮件、未写回飞书。" : "当前已执行合同生成动作。"} VM 确认后，正式流程会生成合同草稿/预览，并写入 workflow_log；合同 docx 不回传 Lark，发送合同仍需人工确认。`,
       required: true,
       summary: {
         run_id: runId,
@@ -246,7 +246,7 @@ function buildCheckpointPayload(
         dry_run: dryRun,
         contract_file_generated: !dryRun
       },
-      writeback_fields_after_confirm: ["合同草稿文件", "workflow_log"]
+      writeback_fields_after_confirm: ["workflow_log", "合同编号/签约状态（后续节点）"]
     };
   }
 

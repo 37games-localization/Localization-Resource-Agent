@@ -85,7 +85,8 @@ def lark_download_attachment(
          "--table-id", table_id,
          "--record-id", record_id,
          "--file-token", file_token,
-         "--output", dest.name],
+         "--output", dest.name,
+         "--as", "bot"],
         capture_output=True, text=True,
         cwd=str(dest.parent),
     )
@@ -263,6 +264,16 @@ def score_contract_template(name: str, fields: dict) -> int:
 
     score = 0
 
+    # Contract info currently carries payment/identity signals, but not a
+    # reliable service-type field. Prefer translation/service templates by
+    # default and avoid routing normal translation vendors to audio-only forms.
+    audio_markers = ["audio recording", "recording", "配音", "录音"]
+    translation_markers = ["翻译委托", "translation service", "service agreement"]
+    if any(marker in lowered or marker in name for marker in audio_markers):
+        score -= 40
+    if any(marker in lowered or marker in name.lower() for marker in translation_markers):
+        score += 15
+
     if is_company_acct:
         if "公司" in name or "business" in lowered or "company" in lowered:
             score += 40
@@ -397,6 +408,22 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
     """
     vm_overrides = vm_overrides or {}
     contract_defaults = _CFG.get("contract_defaults", {}) or {}
+    jia_fang = _CFG.get("jia_fang", {}) or {}
+
+    def default_for(var_name: str) -> str:
+        val = contract_defaults.get(var_name)
+        if val not in (None, ""):
+            return str(val)
+        if var_name in ("甲方联系人姓名", "甲方联系人邮箱", "甲方邮箱"):
+            contact = jia_fang.get("default_contact") or {}
+            if var_name == "甲方联系人姓名":
+                return str(contact.get("name") or "")
+            return str(contact.get("email") or "")
+        if var_name == "合同生效日期":
+            return vm_overrides.get("签署日期", datetime.now().strftime("%Y-%m-%d"))
+        if var_name == "提前终止通知天数":
+            return "30"
+        return ""
 
     # 获取账户类型，决定银行字段路由
     acct_type_raw = extract_text(fields.get(ACCOUNT_TYPE_FIELD_ID, ""))
@@ -441,8 +468,9 @@ def build_var_map(fields: dict, required_vars: list, vm_overrides: dict = None) 
             continue
 
         # 2.5 本机固定合同变量
-        if var in contract_defaults:
-            var_map[key] = str(contract_defaults[var])
+        default_value = default_for(var)
+        if default_value:
+            var_map[key] = default_value
             filled.append(var)
             continue
 
@@ -714,6 +742,7 @@ def main():
     parser.add_argument("--dry-run",   action="store_true", help="只打印变量，不生成文件")
     parser.add_argument("--send",      action="store_true", help="生成后发送邮件")
     parser.add_argument("--draft",     action="store_true", help="生成后保存草稿，VM 双击 .eml 后点发送")
+    parser.add_argument("--no-open",   action="store_true", help="生成后不自动打开 docx（用于自动化验证）")
     parser.add_argument("--yes",       action="store_true", help="跳过交互确认")
     args = parser.parse_args()
 
@@ -868,7 +897,8 @@ def main():
              "--table-id", TEMPLATE_TABLE,
              "--record-id", template_rec["record_id"],
              "--file-token", att_list[0]["file_token"],
-             "--output", template_docx.name],
+             "--output", template_docx.name,
+             "--as", "bot"],
             capture_output=True, text=True,
             cwd=str(template_docx.parent),
         )
@@ -923,16 +953,18 @@ def main():
             print("   提示：这些位置在合同中将显示为空白或原始占位符。")
         else:
             print("✅ 二次检查通过：所有变量已替换完毕")
-            log_manual_step(
-                step_name="合同 docx 生成",
-                status="done",
-                candidate_name=name,
-                candidate_record_id=target["record_id"],
-                input_summary=f"模板: {template_name}",
-                output_summary=f"文件: {output_path}",
-            )
 
-        open_docx(output_path)
+        log_manual_step(
+            step_name="合同 docx 生成",
+            status="done" if not remaining else "waiting",
+            candidate_name=name,
+            candidate_record_id=target["record_id"],
+            input_summary=f"模板: {template_name}",
+            output_summary=f"文件: {output_path}",
+        )
+
+        if not args.no_open:
+            open_docx(output_path)
 
         # ── 发送邮件 ──
         if args.send:
@@ -944,7 +976,10 @@ def main():
             else:
                 print("✅ 合同邮件已发送；「合同签署」字段等待签回核查节点更新。")
         else:
-            print(f"\n合同已打开预览，确认无误后运行：")
+            if args.no_open:
+                print(f"\n合同已生成，确认无误后运行：")
+            else:
+                print(f"\n合同已打开预览，确认无误后运行：")
             print(f"  python3 scripts/generate_contract.py --name '{name}' --send")
 
 

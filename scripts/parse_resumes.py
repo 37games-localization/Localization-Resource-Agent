@@ -156,6 +156,7 @@ def download_pdf(file_token: str, record_id: str = "") -> str:
             "--file-token", file_token,
             "--output", cache_path.name,
             "--overwrite",
+            "--as", "bot",
             "--format", "json",
         ]
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(PDF_CACHE))

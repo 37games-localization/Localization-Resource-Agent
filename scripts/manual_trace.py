@@ -11,7 +11,8 @@ import json
 import time
 from datetime import datetime
 
-from field_resolver import FieldMappingError, field_id, table_ref
+from config_loader import get_table_ref, load_config
+from field_resolver import FieldMappingError, field_id
 from lark_cli_utils import run_lark_cli_json
 
 
@@ -45,8 +46,10 @@ def log_manual_step(
 ) -> str:
     """Write one workflow_log row. Return record_id if available, else empty."""
     try:
-        base_token, table_id = table_ref("workflow_log")
+        base_token, table_id = get_table_ref(load_config(), "workflow_log")
         fields = _workflow_field_map()
+        if not base_token or not table_id:
+            return ""
         actual_run_id = run_id or f"manual-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
         payload = {
             fields["workflow.run_id"]: actual_run_id,
@@ -75,9 +78,16 @@ def log_manual_step(
         if not isinstance(resp, dict):
             return ""
         data = resp.get("data", resp)
+        record = data.get("record") or {}
+        record_ids = (
+            data.get("record_id_list")
+            or record.get("record_id_list")
+            or []
+        )
         return (
             data.get("record_id")
-            or data.get("record", {}).get("record_id")
+            or record.get("record_id")
+            or (record_ids[0] if record_ids else "")
             or data.get("id", "")
             or ""
         )
