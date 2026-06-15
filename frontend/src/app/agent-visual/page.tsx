@@ -229,7 +229,8 @@ export default function AgentVisualPage() {
   const [isRunningAgent, setIsRunningAgent] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const selected = candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0] ?? null;
+  const selected = candidates.find((candidate) => candidate.id === selectedId) ?? null;
+  const displayCandidate = selected ?? candidates[0] ?? null;
   const waitingCount = candidates.filter((candidate) => candidate.status === "waiting").length;
   const alertCount = candidates.filter((candidate) => candidate.status === "alert").length;
   const doneCount = candidates.filter((candidate) => candidate.status === "done").length;
@@ -324,7 +325,6 @@ export default function AgentVisualPage() {
       .then((mapped) => {
         if (cancelled || mapped.length === 0) return;
         setCandidates(mapped);
-        setSelectedId(mapped[0]?.id ?? "");
       })
       .catch((error) => {
         setDataSource(`Lark 读取失败：${error instanceof Error ? error.message : "未知错误"}`);
@@ -335,9 +335,9 @@ export default function AgentVisualPage() {
   }, []);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!displayCandidate) return;
     let cancelled = false;
-    refreshWorkflowTraces(selected)
+    refreshWorkflowTraces(displayCandidate)
       .then((traces) => {
         if (cancelled) return;
       })
@@ -349,7 +349,7 @@ export default function AgentVisualPage() {
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [displayCandidate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -426,10 +426,12 @@ export default function AgentVisualPage() {
     return { type: "record_id", value: candidate.recordId };
   }
 
-  async function runAgentCommand(text: string, candidate?: Candidate) {
-    if (isRunningAgent) return;
-    setRunEvents([]);
-    setIsRunningAgent(true);
+  async function runAgentCommand(text: string, candidate?: Candidate, options: { appendOnly?: boolean } = {}) {
+    if (isRunningAgent && !options.appendOnly) return;
+    if (!options.appendOnly) {
+      setRunEvents([]);
+      setIsRunningAgent(true);
+    }
     appendChat("agent", candidate
       ? `收到。已定位 ${candidate.name}（${candidate.id}），现在调用现有 Agent 脚本执行。`
       : "收到。现在调用现有 Agent 脚本执行。"
@@ -478,8 +480,23 @@ export default function AgentVisualPage() {
     } catch (error) {
       appendChat("agent", `前端请求失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
-      setIsRunningAgent(false);
+      if (!options.appendOnly) setIsRunningAgent(false);
     }
+  }
+
+  async function runBatchResumeEvaluation(text: string, batch: Candidate[]) {
+    if (isRunningAgent) return;
+    setRunEvents([]);
+    setIsRunningAgent(true);
+    appendChat("agent", `进入批量简历评估队列：共 ${batch.length} 条。系统会逐条执行同一个后端简历评估节点，并保留事件流。`);
+    for (const [index, candidate] of batch.entries()) {
+      appendChat("agent", `批量进度 ${index + 1}/${batch.length}：开始处理 ${candidate.name}（${candidate.id}）。`);
+      await runAgentCommand(text, candidate, { appendOnly: true });
+    }
+    appendChat("agent", `批量队列执行完毕：共处理 ${batch.length} 条。请按每条 checkpoint 复核结果。`);
+    setIsRunningAgent(false);
+    await refreshCandidates();
+    if (displayCandidate) await refreshWorkflowTraces(displayCandidate);
   }
 
   async function runCommand(command: string) {
@@ -493,12 +510,7 @@ export default function AgentVisualPage() {
         appendChat("agent", "当前 Lark 候选人表没有待解析简历。");
         return;
       }
-      appendChat(
-        "agent",
-        `当前共有 ${pending.length} 份简历尚未写入评分结果：${pending
-          .map((candidate) => `${candidate.name}（${candidate.id}）`)
-          .join("、")}。你可以选择单个候选人继续处理。`
-      );
+      await runBatchResumeEvaluation(text, pending);
       return;
     }
 
@@ -563,6 +575,12 @@ export default function AgentVisualPage() {
   }
 
   async function confirmAdvance() {
+    if (!selected) {
+      const message = "确认推进需要先选中单个候选人；批量结果请逐条打开 checkpoint 复核。";
+      appendChat("agent", message);
+      handleToast(message);
+      return;
+    }
     if (!canConfirmAdvance) {
       const message = `确认推进已禁用：${confirmDisabledReason || "当前执行未闭环"}。`;
       appendChat("agent", message);
@@ -624,6 +642,10 @@ export default function AgentVisualPage() {
   }
 
   async function submitReview() {
+    if (!selected) {
+      handleToast("修改结果需要先选中单个候选人");
+      return;
+    }
     if (latestCheckpointKind !== "resume") {
       handleToast("请先运行本轮简历评估");
       return;
@@ -671,7 +693,7 @@ export default function AgentVisualPage() {
     handleToast("已记录人工修改并生成 Badcase");
   }
 
-  if (!selected && activeTab === "overview") {
+  if (!displayCandidate && activeTab === "overview") {
     return (
       <main className="agent-visual">
         <header className="visual-nav">
@@ -692,7 +714,7 @@ export default function AgentVisualPage() {
     );
   }
 
-  if (!selected && activeTab === "config") {
+  if (!displayCandidate && activeTab === "config") {
     return (
       <main className="agent-visual">
         <header className="visual-nav">
@@ -788,7 +810,7 @@ export default function AgentVisualPage() {
           <div className="visual-chat-header">
             <div>
               <span>对话流 · Agent 执行</span>
-              <strong>{selected.name} · {selected.id}</strong>
+              <strong>{selected ? `${selected.name} · ${selected.id}` : "未选择候选人"}</strong>
               <small>候选人状态来自 Lark 字段，不等同于本次 trace。</small>
             </div>
               <button
@@ -848,11 +870,11 @@ export default function AgentVisualPage() {
                   <Info label="评级" value={String(latestCheckpointSummary?.final_tier ?? "待生成")} mono accent />
                   <Info label="AI 建议" value={String(latestCheckpointSummary?.ai_suggestion ?? "待生成")} accent />
                   <Info label="置信度" value={String(latestCheckpointSummary?.confidence ?? "待生成")} mono />
-                  <Info label="置信度原因" value={selected.confidenceReason} />
-                  <Info label="下一步建议" value={selected.nextStep} accent />
+                  <Info label="置信度原因" value={displayCandidate.confidenceReason} />
+                  <Info label="下一步建议" value={displayCandidate.nextStep} accent />
                 </div>
                 <div className="checkpoint-evidence">
-                  {selected.comment}
+                  {displayCandidate.comment}
                 </div>
                 {checkpointMode === "editing" ? (
                   <div className="checkpoint-edit-form">
@@ -900,9 +922,9 @@ export default function AgentVisualPage() {
           <div className="visual-chat-input">
           <div className="quick-actions">
               <button disabled={isRunningAgent} onClick={() => void runCommand("看一下所有还没解析的简历")} type="button">待解析简历</button>
-              <button disabled={isRunningAgent} onClick={() => selected && void runCommand(`看下${selected.name}的简历`)} type="button">看当前简历</button>
+              <button disabled={isRunningAgent || !selected} onClick={() => selected && void runCommand(`看下${selected.name}的简历`)} type="button">看当前简历</button>
               {["发测试题", "准备合同", "检查签字合同"].map((item) => (
-                <button disabled={isRunningAgent} key={item} onClick={() => selected && void runCommand(`${item}：${selected.name}`)} type="button">{item}</button>
+                <button disabled={isRunningAgent || !selected} key={item} onClick={() => selected && void runCommand(`${item}：${selected.name}`)} type="button">{item}</button>
               ))}
               <button disabled={!canEditReview} onClick={() => setCheckpointMode("editing")} title={canEditReview ? "进入真实写回修改" : confirmDisabledReason} type="button">修改结果</button>
             </div>
@@ -983,8 +1005,8 @@ export default function AgentVisualPage() {
             </p>
             <p className="usage-note">{usageNote}</p>
           </section>
-          <MetricGroup title="当前记录" items={[["record_id", selected.recordId], ["供应商编号", selected.id], ["Lark状态节点", selected.currentNode], ["风险提示", selected.risk]]} />
-          <MetricGroup title="最近写回字段" items={[["rating", selected.rating], ["score", selected.score], ["aiSuggestion", selected.aiSuggestion], ["confidence", `${selected.confidence}%`]]} />
+          <MetricGroup title={selected ? "当前选中记录" : "默认展示记录"} items={[["record_id", displayCandidate.recordId], ["供应商编号", displayCandidate.id], ["Lark状态节点", displayCandidate.currentNode], ["风险提示", displayCandidate.risk]]} />
+          <MetricGroup title="最近写回字段" items={[["rating", displayCandidate.rating], ["score", displayCandidate.score], ["aiSuggestion", displayCandidate.aiSuggestion], ["confidence", `${displayCandidate.confidence}%`]]} />
           <section className="execution-section">
             <h3>真实 Trace</h3>
             {workflowTraces.length > 0 ? (
