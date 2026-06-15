@@ -95,6 +95,16 @@ function textValue(value: unknown) {
   return "";
 }
 
+function numberValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/,/g, "").trim();
+  const match = normalized.match(/[+-]?\d+(?:\.\d+)?/);
+  if (!match) return undefined;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function isResumeCheckpointSummary(summary: Record<string, unknown>) {
   const hasNonResumeKeys =
     "subject" in summary ||
@@ -205,20 +215,18 @@ export async function POST(request: Request) {
       "期望结果": null
     };
 
-    if (summary.total_score) confirmedFields["Agent总分"] = Number(summary.total_score) || summary.total_score;
+    const totalScore = numberValue(summary.total_score);
+    if (totalScore !== undefined) confirmedFields["Agent总分"] = totalScore;
     if (summary.final_tier) confirmedFields["初始评级"] = summary.final_tier;
     if (summary.ai_suggestion) confirmedFields["AI建议"] = summary.ai_suggestion;
     if (summary.comment) confirmedFields["点评"] = summary.comment;
     if (summary.valid_resume) confirmedFields["有效简历"] = summary.valid_resume;
-    if (summary.extracted_word_count && summary.extracted_word_count !== "未识别") {
-      confirmedFields["解析字数"] = Number(summary.extracted_word_count) || summary.extracted_word_count;
-    }
-    if (summary.years && summary.years !== "未识别") {
-      confirmedFields["解析年限"] = Number(summary.years) || summary.years;
-    }
-    if (summary.project_count && summary.project_count !== "未识别") {
-      confirmedFields["解析项目数"] = Number(summary.project_count) || summary.project_count;
-    }
+    const wordCount = numberValue(summary.extracted_word_count);
+    if (wordCount !== undefined) confirmedFields["解析字数"] = wordCount;
+    const years = numberValue(summary.years);
+    if (years !== undefined) confirmedFields["解析年限"] = years;
+    const projectCount = numberValue(summary.project_count);
+    if (projectCount !== undefined) confirmedFields["解析项目数"] = projectCount;
 
     updateCandidate(body.recordId, confirmedFields);
     writeWorkflowLog({
