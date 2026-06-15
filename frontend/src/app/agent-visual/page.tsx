@@ -664,6 +664,7 @@ export default function AgentVisualPage() {
         rating: reviewRating,
         aiSuggestion: reviewSuggestion,
         reason: reviewReason,
+        checkpointSummary: latestCheckpointSummary,
         checkpointKind: latestCheckpointKind,
         runId: latestRunCheckpoint?.run_id,
         candidateName: selected.name,

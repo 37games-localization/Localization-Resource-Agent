@@ -153,7 +153,9 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (body.action !== "modify" && summary.execution_mode !== "production") {
+    const executionMode = summary.execution_mode || body.mode;
+
+    if (body.action !== "modify" && executionMode !== "production") {
       return NextResponse.json(
         { ok: false, error: "当前 checkpoint 不是 production 执行结果，不能通过前端确认写回。请切换 PRODUCTION 后重新运行简历评估。" },
         { status: 400 }
@@ -170,7 +172,7 @@ export async function POST(request: Request) {
       if (!body.reason?.trim()) {
         return NextResponse.json({ ok: false, error: "修改结果必须填写调整原因" }, { status: 400 });
       }
-      if (body.mode !== "production" || summary.execution_mode !== "production") {
+      if (body.mode !== "production" || executionMode !== "production") {
         return NextResponse.json(
           { ok: false, error: "人工修改只能绑定 production 简历评估 checkpoint，dry-run 不能写回 Badcase。" },
           { status: 400 }
