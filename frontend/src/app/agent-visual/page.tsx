@@ -1069,6 +1069,14 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
   const [schemaMessage, setSchemaMessage] = useState("");
   const schemaMissingCount = schemaCheckpoint?.tables?.reduce((sum, table) => sum + table.missing.length, 0) ?? 0;
 
+  function fieldPurposeText(purpose?: string) {
+    if (!purpose) return "字段用途未识别";
+    const [name, type, required] = purpose.split("/").map((item) => item.trim()).filter(Boolean);
+    return [type ? `类型：${type}` : "", required ? `要求：${required}` : "", name ? `用途：${name}` : ""]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
   const runSchemaAction = async (action: "propose" | "adjust" | "confirm", createMissingFields = false) => {
     setSchemaBusy(true);
     setSchemaMessage("");
@@ -1171,9 +1179,11 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
                     <div className="schema-mini-list">
                       <h3>需要 VM 确认的疑似映射</h3>
                       {table.fuzzy.slice(0, 10).map((item) => (
-                        <p key={`${table.table_key}-${item.logical_key}`}>
-                          <code>{item.logical_key}</code> → {item.field_name} <span>score={item.score}</span>
-                        </p>
+                        <div className="schema-field-row" key={`${table.table_key}-${item.logical_key}`}>
+                          <strong>{item.field_name || "未匹配到表头"}</strong>
+                          <span>{fieldPurposeText(item.purpose)}</span>
+                          <small>建议用途：{item.expected_name || item.logical_key} · 置信度 {item.score}</small>
+                        </div>
                       ))}
                     </div>
                   )}
@@ -1181,18 +1191,22 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
                     <div className="schema-mini-list">
                       <h3>缺失字段</h3>
                       {table.missing.slice(0, 10).map((item) => (
-                        <p key={`${table.table_key}-${item.logical_key}`}>
-                          <code>{item.logical_key}</code> / {item.expected_name} / {item.required ? "必需" : "建议"}
-                        </p>
+                        <div className="schema-field-row" key={`${table.table_key}-${item.logical_key}`}>
+                          <strong>{item.expected_name}</strong>
+                          <span>{fieldPurposeText(item.purpose)}</span>
+                          <small>{item.required ? "必需字段" : "建议字段"} · 当前 Lark 表未找到对应表头</small>
+                        </div>
                       ))}
                     </div>
                   )}
                   <div className="schema-mini-list">
                     <h3>当前映射</h3>
                     {table.mapped.slice(0, 16).map((item) => (
-                      <p key={`${table.table_key}-${item.logical_key}`}>
-                        <code>{item.logical_key}</code> → {item.field_name} <span>{item.match_type}</span>
-                      </p>
+                      <div className="schema-field-row" key={`${table.table_key}-${item.logical_key}`}>
+                        <strong>{item.field_name || item.expected_name || item.logical_key}</strong>
+                        <span>{fieldPurposeText(item.purpose)}</span>
+                        <small>{item.match_type} · {item.logical_key}</small>
+                      </div>
                     ))}
                   </div>
                 </details>

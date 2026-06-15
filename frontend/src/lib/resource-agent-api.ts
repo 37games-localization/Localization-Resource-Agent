@@ -63,6 +63,7 @@ export type SchemaCheckpointTable = {
     purpose: string;
     field_id: string;
     field_name: string;
+    expected_name?: string;
     match_type: string;
     confirmed: boolean;
   }>;
