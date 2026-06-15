@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { NextResponse } from "next/server";
-import { larkTableConfig } from "@/lib/lark-data-access";
+import { larkTableConfig, mappedFieldKey } from "@/lib/lark-data-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,6 +50,26 @@ function updateCandidate(recordId: string, fields: Record<string, unknown>) {
   upsertRecord("candidate", fields, recordId);
 }
 
+function candidateField(logicalKey: string, fallbackName: string) {
+  return mappedFieldKey("candidate", logicalKey, fallbackName);
+}
+
+function workflowField(logicalKey: string, fallbackName: string) {
+  return mappedFieldKey("workflow_log", logicalKey, fallbackName);
+}
+
+function setField(
+  fields: Record<string, unknown>,
+  tableField: (logicalKey: string, fallbackName: string) => string,
+  logicalKey: string,
+  fallbackName: string,
+  value: unknown
+) {
+  const key = tableField(logicalKey, fallbackName);
+  fields[key] = value;
+  return key;
+}
+
 function larkDatetime(date = new Date()) {
   return date.getTime();
 }
@@ -65,18 +85,18 @@ function writeWorkflowLog(fields: {
   outputSummary: string;
   decision: string;
 }) {
-  upsertRecord("workflowLog", {
-    run_id: fields.runId,
-    candidate_record_id: fields.candidateRecordId,
-    candidate_name: fields.candidateName || "",
-    step_name: fields.stepName,
-    step_type: fields.stepType,
-    status: fields.status,
-    input_summary: fields.inputSummary,
-    output_summary: fields.outputSummary,
-    decision: fields.decision,
-    created_at: larkDatetime()
-  });
+  const payload: Record<string, unknown> = {};
+  setField(payload, workflowField, "workflow.run_id", "run_id", fields.runId);
+  setField(payload, workflowField, "workflow.candidate_record_id", "candidate_record_id", fields.candidateRecordId);
+  setField(payload, workflowField, "workflow.candidate_name", "candidate_name", fields.candidateName || "");
+  setField(payload, workflowField, "workflow.step_name", "step_name", fields.stepName);
+  setField(payload, workflowField, "workflow.step_type", "step_type", fields.stepType);
+  setField(payload, workflowField, "workflow.status", "status", fields.status);
+  setField(payload, workflowField, "workflow.input_summary", "input_summary", fields.inputSummary);
+  setField(payload, workflowField, "workflow.output_summary", "output_summary", fields.outputSummary);
+  setField(payload, workflowField, "workflow.decision", "decision", fields.decision);
+  setField(payload, workflowField, "workflow.created_at", "created_at", larkDatetime());
+  upsertRecord("workflowLog", payload);
 }
 
 function summaryText(summary: Record<string, unknown>) {
@@ -166,13 +186,14 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
-      updateCandidate(body.recordId, {
-        "初始评级": body.rating || "A",
-        "AI建议": body.aiSuggestion || "人工复核",
-        "是否Badcase": "⚠️ 是",
-        "期望结果": body.reason,
-        "招募状态": "初筛中"
-      });
+      const modifiedFields: Record<string, unknown> = {};
+      const modifiedFieldLabels = ["初始评级", "AI建议", "是否Badcase", "期望结果", "招募状态"];
+      setField(modifiedFields, candidateField, "candidate.tier", "初始评级", body.rating || "A");
+      setField(modifiedFields, candidateField, "candidate.ai_suggestion", "AI建议", body.aiSuggestion || "人工复核");
+      setField(modifiedFields, candidateField, "candidate.badcase_flag", "是否Badcase", "⚠️ 是");
+      setField(modifiedFields, candidateField, "candidate.expected_result", "期望结果", body.reason);
+      setField(modifiedFields, candidateField, "candidate.status", "招募状态", "初筛中");
+      updateCandidate(body.recordId, modifiedFields);
       writeWorkflowLog({
         runId: checkpointRunId(body, summary),
         candidateRecordId: body.recordId,
@@ -188,7 +209,7 @@ export async function POST(request: Request) {
         ok: true,
         data: {
           status: "badcase_recorded",
-          updatedFields: ["初始评级", "AI建议", "Badcase 标记", "期望结果"]
+          updatedFields: modifiedFieldLabels
         }
       });
     }
@@ -199,25 +220,43 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    const confirmedFields: Record<string, unknown> = {
-      "招募状态": "初筛通过",
-      "是否Badcase": null,
-      "期望结果": null
-    };
+    const confirmedFields: Record<string, unknown> = {};
+    const confirmedFieldLabels = ["招募状态", "是否Badcase", "期望结果"];
+    setField(confirmedFields, candidateField, "candidate.status", "招募状态", "初筛通过");
+    setField(confirmedFields, candidateField, "candidate.badcase_flag", "是否Badcase", null);
+    setField(confirmedFields, candidateField, "candidate.expected_result", "期望结果", null);
 
-    if (summary.total_score) confirmedFields["Agent总分"] = Number(summary.total_score) || summary.total_score;
-    if (summary.final_tier) confirmedFields["初始评级"] = summary.final_tier;
-    if (summary.ai_suggestion) confirmedFields["AI建议"] = summary.ai_suggestion;
-    if (summary.comment) confirmedFields["点评"] = summary.comment;
-    if (summary.valid_resume) confirmedFields["有效简历"] = summary.valid_resume;
+    if (summary.total_score) {
+      setField(confirmedFields, candidateField, "candidate.score", "Agent总分", Number(summary.total_score) || summary.total_score);
+      confirmedFieldLabels.push("Agent总分");
+    }
+    if (summary.final_tier) {
+      setField(confirmedFields, candidateField, "candidate.tier", "初始评级", summary.final_tier);
+      confirmedFieldLabels.push("初始评级");
+    }
+    if (summary.ai_suggestion) {
+      setField(confirmedFields, candidateField, "candidate.ai_suggestion", "AI建议", summary.ai_suggestion);
+      confirmedFieldLabels.push("AI建议");
+    }
+    if (summary.comment) {
+      setField(confirmedFields, candidateField, "candidate.score_basis", "评分依据", summary.comment);
+      confirmedFieldLabels.push("评分依据");
+    }
+    if (summary.valid_resume) {
+      setField(confirmedFields, candidateField, "candidate.valid_resume", "有效简历", summary.valid_resume);
+      confirmedFieldLabels.push("有效简历");
+    }
     if (summary.extracted_word_count && summary.extracted_word_count !== "未识别") {
-      confirmedFields["解析字数"] = Number(summary.extracted_word_count) || summary.extracted_word_count;
+      setField(confirmedFields, candidateField, "candidate.parsed_word_count", "解析字数", Number(summary.extracted_word_count) || summary.extracted_word_count);
+      confirmedFieldLabels.push("解析字数");
     }
     if (summary.years && summary.years !== "未识别") {
-      confirmedFields["解析年限"] = Number(summary.years) || summary.years;
+      setField(confirmedFields, candidateField, "candidate.parsed_years", "解析年限", Number(summary.years) || summary.years);
+      confirmedFieldLabels.push("解析年限");
     }
     if (summary.project_count && summary.project_count !== "未识别") {
-      confirmedFields["解析项目数"] = Number(summary.project_count) || summary.project_count;
+      setField(confirmedFields, candidateField, "candidate.parsed_project_count", "解析项目数", Number(summary.project_count) || summary.project_count);
+      confirmedFieldLabels.push("解析项目数");
     }
 
     updateCandidate(body.recordId, confirmedFields);
@@ -229,14 +268,14 @@ export async function POST(request: Request) {
       stepType: "checkpoint",
       status: "decided",
       inputSummary: `mode=${body.mode || "dry_run"}；VM 确认简历评估 checkpoint`,
-      outputSummary: `写回字段：${Object.keys(confirmedFields).join("、")}`,
+      outputSummary: `写回字段：${confirmedFieldLabels.join("、")}`,
       decision: summaryText(summary)
     });
     return NextResponse.json({
       ok: true,
       data: {
         status: "confirmed",
-        updatedFields: Object.keys(confirmedFields)
+        updatedFields: confirmedFieldLabels
       }
     });
   } catch (error) {

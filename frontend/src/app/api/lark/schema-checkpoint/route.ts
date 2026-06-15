@@ -18,7 +18,11 @@ function runSchemaCheckpoint(args: string[]) {
   const skillRoot = getSkillRoot();
   const result = spawnSync("python3", [`${skillRoot}/scripts/schema_mapping_checkpoint.py`, ...args], {
     cwd: skillRoot,
-    env: { ...process.env, PYTHONUNBUFFERED: "1" },
+    env: {
+      ...process.env,
+      LOC_CONFIG_PATH: process.env.LOC_CONFIG_PATH || process.env.LOC_AGENT_CONFIG || "",
+      PYTHONUNBUFFERED: "1"
+    },
     encoding: "utf8",
     timeout: 120_000
   });

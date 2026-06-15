@@ -89,6 +89,11 @@ export type SchemaCheckpointTable = {
     expected_type: string;
     actual_type: string;
   }>;
+  actual_fields?: Array<{
+    field_id: string;
+    field_name: string;
+    type: string;
+  }>;
   error?: string;
 };
 
