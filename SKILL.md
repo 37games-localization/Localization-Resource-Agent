@@ -42,18 +42,19 @@ python3 scripts/lock_user_install.py
 生产表接入/迁移校验（VM 更换 Lark 表，或说「帮我检查这张资源管理表能不能用」时执行）：
 ```bash
 cd ~/.agents/skills/loc-resume-screening
-python3 scripts/schema_validator.py --table all
+python3 scripts/schema_mapping_checkpoint.py propose --table all
 ```
 
-如果缺少必要字段，先把差异报告告诉 VM。VM 确认后才允许自动新增字段：
+如果缺少必要字段，先把 checkpoint 中的缺失字段、疑似映射和字段用途展示给 VM。VM 确认需要新增字段后，才允许补齐缺失列并重新生成 checkpoint：
 ```bash
-python3 scripts/schema_validator.py --table all --apply --create-missing-tables
+python3 scripts/schema_mapping_checkpoint.py propose --table all --create-missing-fields --yes
 ```
 
 说明：
-- `--apply` 只在 VM 确认后使用。
-- `--create-missing-tables` 只会创建 schema 允许自动创建的辅助表；当前仅允许创建 `Agent流程日志`，不会自动创建候选人主表或合同敏感信息表。
-- 校验通过后会生成 `config/lark-field-mapping.yaml`。工作流日志写入和待决策查询会优先读取该映射中的 base/table/field_id，缺映射时才回退旧配置。
+- `propose` 只生成 checkpoint，不会保存字段映射。
+- 如 VM 认为疑似映射不正确，按 VM 描述调整：`python3 scripts/schema_mapping_checkpoint.py adjust --token <checkpoint_token> --note "把 candidate.resume 映射到 简历附件"`。
+- VM 确认映射无误后，才运行：`python3 scripts/schema_mapping_checkpoint.py confirm --token <checkpoint_token>`。
+- `confirm` 后才会生成或刷新 `config/lark-field-mapping.yaml`。工作流日志写入和待决策查询会优先读取该映射中的 base/table/field_id，缺映射时才回退旧配置。
 - 字段英文 key 的业务含义见 [`references/lark-field-dictionary.md`](references/lark-field-dictionary.md)。VM 改表头或换新表时，先用这份字典确认每列存什么信息、影响哪个节点。
 
 ## 脚本速查
@@ -70,7 +71,8 @@ python3 scripts/schema_validator.py --table all --apply --create-missing-tables
 | `update_status.py` | 手动推进招募状态 | 「把XXX状态改成XXX」 |
 | `export_badcase_snapshots.py` | VM 侧导出统一协议 badcase 脱敏快照并上传飞书 | 「导出badcase」「推送badcase」 |
 | `push_badcase_issues.py` | 项目侧读取脱敏 snapshot，按统一模板创建 GitHub issue | 项目负责人集中开 issue |
-| `schema_validator.py` | 生产表准入校验：表头识别、缺列/多列/类型差异、生成字段映射 | 「检查这张Lark表能不能用」「更换生产表」 |
+| `schema_mapping_checkpoint.py` | 生产表准入校验：表头识别、缺列/疑似匹配/类型差异，VM 确认后保存字段映射 | 「检查这张Lark表能不能用」「更换生产表」 |
+| `schema_validator.py` | 底层只读 schema 校验引擎，供 checkpoint 使用 | 维护排查 |
 | `schema_gate.py` | 生产运行门禁：检查字段映射完整性，正式环境未通过则阻止业务执行 | 切正式环境前自动生效 |
 | `lock_user_install.py` | 锁定用户安装：核心文件只读，禁用误 push | 初始化配置完成后 |
 | `verify_pricing_rule_coverage.py` | 读取 Lark 评分规则表，检查 22 个主流市场语言对是否齐全 | 「检查评分规则语种覆盖」 |
@@ -100,7 +102,7 @@ python3 scripts/start_frontend.py
 
 允许 VM 日常执行的变更：
 - 修改 `config.local.yaml` 中的本机配置。
-- 运行 `schema_validator.py` 检查或补齐允许自动创建的 Lark 辅助字段。
+- 运行 `schema_mapping_checkpoint.py` 检查字段映射；在 checkpoint 展示缺失字段后，经 VM 确认再补齐允许自动创建的 Lark 辅助字段。
 - 调整 Lark 里的候选人数据、评分规则、合同信息、合同模板记录。
 - 标记 Badcase、填写期望结果、导出脱敏快照。
 - 运行 `lock_user_install.py` 锁定安装目录。
@@ -119,8 +121,9 @@ python3 scripts/start_frontend.py
 切正式环境后（`test_mode.enabled=false`），`run_dialog.py` 和 `workflow_runner.py` 会先调用 `schema_gate.py`。如果 `config/lark-field-mapping.yaml` 缺少候选人表、流程日志表或合同表的必需字段映射，会直接停止执行，并提示 VM 先跑：
 
 ```bash
-python3 scripts/schema_validator.py --table all
-python3 scripts/schema_validator.py --table all --apply --create-missing-tables
+python3 scripts/schema_mapping_checkpoint.py propose --table all
+python3 scripts/schema_mapping_checkpoint.py adjust --token <checkpoint_token> --note "把 candidate.resume 映射到 简历附件"
+python3 scripts/schema_mapping_checkpoint.py confirm --token <checkpoint_token>
 ```
 
 如需在 TEST_MODE 提前模拟正式门禁：
@@ -290,7 +293,7 @@ LLM 解析不准时（常见于简历字数格式特殊）：
 | 合同信息、银行信息、证件信息 | 修改合同信息收集表对应行 |
 | 合同模板 | 在飞书合同模板表维护模板记录 |
 | 本机环境配置 | 修改 `config.local.yaml` |
-| 表头变化 / 换表 | 让 Agent 运行 `schema_validator.py` 重新检查并生成字段映射 |
+| 表头变化 / 换表 | 让 Agent 运行 `schema_mapping_checkpoint.py` 生成 checkpoint，VM 确认后保存字段映射 |
 | prompt、邮件文案、评分引擎、核心脚本、前端/API | 不允许 VM 日常直接修改；请标记 Badcase 或联系项目维护者 |
 
 ---
@@ -407,7 +410,7 @@ VM 提出任何涉及上述飞书资源的变更请求时，Agent 必须：
      · scripts/generate_contract.py（依赖此字段取值）
    执行顺序：
      1. [飞书操作]
-     2. [重新运行 schema_validator.py 生成字段映射]
+     2. [重新运行 schema_mapping_checkpoint.py 生成 checkpoint，确认后保存字段映射]
      3. [dry-run 验证]
    是否继续？请 VM 确认后执行。
 

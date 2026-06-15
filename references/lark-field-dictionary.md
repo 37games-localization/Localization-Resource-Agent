@@ -6,8 +6,9 @@
 
 - `key` 是 Agent 内部稳定字段名，不建议改。
 - VM 可以改 Lark 表头中文名，但不要改变字段承载的业务含义。
-- 换新表时，先跑 `python3 scripts/schema_validator.py --table all`，Agent 会按表头和别名识别字段。
+- 换新表时，先跑 `python3 scripts/schema_mapping_checkpoint.py propose --table all`，Agent 会按表头和别名生成字段映射 checkpoint。
 - 如果校验报告提示缺字段，先看本字典确认字段用途，再决定新增列或映射到已有列。
+- 映射只有在 VM 确认并运行 `schema_mapping_checkpoint.py confirm --token <checkpoint_token>` 后才会保存。
 - `required=true` 表示当前生产链路必须有；`required=false` 表示对应能力启用时需要。
 
 ## 候选人主表 `candidate`

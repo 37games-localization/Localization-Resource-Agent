@@ -5,7 +5,8 @@ schema_gate.py
 Lightweight runtime gate for production workflow commands.
 
 It checks config/lark-field-mapping.yaml only. Full Lark table inspection and
-field creation are handled by schema_validator.py.
+field creation and mapping confirmation are handled by
+schema_mapping_checkpoint.py.
 """
 
 import argparse
@@ -111,9 +112,13 @@ def assert_schema_ready(operation: str):
     if result["ok"]:
         return
     command = (
-        "python3 scripts/schema_validator.py --table all\n"
-        "VM 确认差异后再运行：\n"
-        "python3 scripts/schema_validator.py --table all --apply --create-missing-tables"
+        "python3 scripts/schema_mapping_checkpoint.py propose --table all\n"
+        "如需补齐缺失字段，先让 VM 确认 checkpoint 中的缺失清单，再运行：\n"
+        "python3 scripts/schema_mapping_checkpoint.py propose --table all --create-missing-fields --yes\n"
+        "如需调整映射，运行：\n"
+        "python3 scripts/schema_mapping_checkpoint.py adjust --token <checkpoint_token> --note \"把 candidate.resume 映射到 简历附件\"\n"
+        "VM 确认映射无误后再运行：\n"
+        "python3 scripts/schema_mapping_checkpoint.py confirm --token <checkpoint_token>"
     )
     details = "\n".join(f"- {item}" for item in result["issues"])
     raise RuntimeError(
@@ -141,9 +146,13 @@ def main():
             for item in result["issues"]:
                 print(f"- {item}")
             print("\n请先运行：")
-            print("python3 scripts/schema_validator.py --table all")
-            print("VM 确认差异后再运行：")
-            print("python3 scripts/schema_validator.py --table all --apply --create-missing-tables")
+            print("python3 scripts/schema_mapping_checkpoint.py propose --table all")
+            print("如需补齐缺失字段，先让 VM 确认 checkpoint 中的缺失清单，再运行：")
+            print("python3 scripts/schema_mapping_checkpoint.py propose --table all --create-missing-fields --yes")
+            print("如需调整映射，运行：")
+            print('python3 scripts/schema_mapping_checkpoint.py adjust --token <checkpoint_token> --note "把 candidate.resume 映射到 简历附件"')
+            print("VM 确认映射无误后再运行：")
+            print("python3 scripts/schema_mapping_checkpoint.py confirm --token <checkpoint_token>")
 
     if args.enforce and not result["ok"]:
         sys.exit(1)

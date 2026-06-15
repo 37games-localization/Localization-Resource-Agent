@@ -223,7 +223,8 @@ loc-resume-screening/
 │   ├── verify_pricing_rule_coverage.py # 检查 Lark 评分规则主流市场覆盖
 │   ├── workflow_runner.py      # 手动串联入口
 │   ├── workflow_engine.py      # 过程日志/人工确认基础能力
-│   ├── schema_validator.py     # 飞书表头检查与字段映射
+│   ├── schema_mapping_checkpoint.py # 换表字段映射 checkpoint，VM 确认后保存
+│   ├── schema_validator.py     # 底层飞书表头检查引擎
 │   ├── update_status.py        # 状态推进
 │   ├── export_badcase_snapshots.py  # VM 侧 Badcase 脱敏快照导出
 │   ├── push_badcase_issues.py       # 项目侧统一格式 GitHub issue 创建

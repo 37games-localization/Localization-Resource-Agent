@@ -1067,6 +1067,7 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
   const [schemaNote, setSchemaNote] = useState("");
   const [schemaBusy, setSchemaBusy] = useState(false);
   const [schemaMessage, setSchemaMessage] = useState("");
+  const schemaMissingCount = schemaCheckpoint?.tables?.reduce((sum, table) => sum + table.missing.length, 0) ?? 0;
 
   const runSchemaAction = async (action: "propose" | "adjust" | "confirm", createMissingFields = false) => {
     setSchemaBusy(true);
@@ -1120,8 +1121,13 @@ function ConfigView({ config, configSource }: { config: LarkConfigPayload | null
           <button disabled={schemaBusy} onClick={() => runSchemaAction("propose")} type="button">
             检查字段映射
           </button>
-          <button disabled={schemaBusy} onClick={() => runSchemaAction("propose", true)} type="button">
-            补齐缺失列并检查
+          <button
+            disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token || schemaMissingCount === 0}
+            onClick={() => runSchemaAction("propose", true)}
+            title="先检查字段映射并核对缺失字段清单，确认需要新增后再点击。"
+            type="button"
+          >
+            确认新增缺失列并重新检查
           </button>
           <button disabled={schemaBusy || !schemaCheckpoint?.checkpoint_token} onClick={() => runSchemaAction("confirm")} type="button">
             确认保存映射

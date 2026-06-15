@@ -2,7 +2,7 @@
 
 ## 飞书 Base 信息
 
-这里不再保存真实 token / table-id。VM 更换表或部署新环境时，应先在本机 `config.local.yaml` 中填写真实配置，再运行 `schema_validator.py` 做表头识别。
+这里不再保存真实 token / table-id。VM 更换表或部署新环境时，应先在本机 `config.local.yaml` 中填写真实配置，再运行 `schema_mapping_checkpoint.py propose --table all` 做表头识别和映射确认。
 
 | 项目 | 用途 | 填写位置 |
 |------|----|
@@ -29,7 +29,7 @@ llm:
 
 ## 关键字段 ID
 
-当前 Field ID 仅是现有测试表的参考。实际运行优先读取 `config/lark-field-mapping.yaml`；VM 更换 Lark 表后，先运行 `python3 scripts/schema_validator.py --table all` 做只读识别，确认无误后再用 `--apply` 刷新新映射。
+当前 Field ID 仅是现有测试表的参考。实际运行优先读取 `config/lark-field-mapping.yaml`；VM 更换 Lark 表后，先运行 `python3 scripts/schema_mapping_checkpoint.py propose --table all` 生成 checkpoint。VM 确认或描述调整后，再运行 `adjust` / `confirm` 刷新新映射。
 
 ### 输入字段（VM 填写）
 | 字段名 | Field ID | 类型 |
