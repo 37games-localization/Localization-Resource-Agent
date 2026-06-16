@@ -122,6 +122,32 @@ def error_code_for(message: str) -> str:
     return "cli_error"
 
 
+def infer_chat_command(message: str) -> str | None:
+    """Route natural-language VM input inside the CLI, not in the GUI wrapper."""
+    normalized = message.strip()
+    sent_signal = re.search(r"已发送|已发出|已经发送|已经发出|人工发送|标记.*发送", normalized)
+    contract_info_signal = re.search(r"签约信息|合同信息收集|收集合同信息|签约资料|收款信息", normalized)
+    if sent_signal and contract_info_signal:
+        return "contract-info-email"
+    if contract_info_signal:
+        return "contract-info-email"
+    if sent_signal and "测试" in normalized:
+        return "test-email"
+    if re.search(r"发.*测试|测试题|测试稿|测试邀请|测试邮件", normalized):
+        return "test-email"
+    if re.search(r"签字|签署|核查|检查.*合同|签回", normalized):
+        return None
+    if re.search(r"准备合同|生成合同|发合同|合同草稿", normalized):
+        return "contract"
+    if re.search(r"重算评分|重跑评分|重新评分", normalized):
+        return "score"
+    if re.search(r"看|查|简历|处理|评估|初筛", normalized):
+        return "score"
+    if re.search(r"状态|推进|财务登记", normalized):
+        return None
+    return None
+
+
 def emit_jsonl_event(event_type: str, *, payload: dict | None = None, **fields):
     """Emit exactly one JSON object per stdout line."""
     print(json.dumps(build_jsonl_event(event_type, payload=payload, **fields), ensure_ascii=False, separators=(",", ":")))
@@ -410,6 +436,33 @@ def cmd_contract(args):
         cmd += ["--name", args.name]
 
     _run_simple(cmd, candidate, args)
+
+
+def cmd_chat(args):
+    """Natural-language CLI entrypoint used by Thin GUI Wrapper."""
+    command = infer_chat_command(args.message or "")
+    if not command:
+        emit_error("无法从 VM 指令中识别要执行的资源管理动作。请明确说明：看简历/评估、发测试题、准备合同，或使用固定按钮。", code="unknown_action")
+        return
+
+    forwarded = argparse.Namespace(
+        command=command,
+        name=args.name,
+        record_id=args.record_id,
+        file=args.file,
+        jsonl=getattr(args, "jsonl", False),
+        run_id=getattr(args, "run_id", None),
+    )
+    if command == "score":
+        cmd_score(forwarded)
+    elif command == "test-email":
+        cmd_test_email(forwarded)
+    elif command == "contract-info-email":
+        cmd_contract_info_email(forwarded)
+    elif command == "contract":
+        cmd_contract(forwarded)
+    else:
+        emit_error(f"CLI chat 暂不支持该动作：{command}", code="unsupported_action")
 
 
 # ── 子命令：resume ────────────────────────────────────────────────────────────
@@ -808,7 +861,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_jsonl_option(p_email)
     p_email.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_email.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
-    p_email.add_argument("--file",      required=True, help="测试题 PDF 路径")
+    p_email.add_argument("--file",      help="测试题 PDF 路径")
 
     # contract-info-email
     p_contract_info = sub.add_parser("contract-info-email", help="发送签约信息收集邮件")
@@ -821,6 +874,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_jsonl_option(p_contract)
     p_contract.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_contract.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+
+    # chat
+    p_chat = sub.add_parser("chat", help="自然语言入口（由 CLI 判断资源管理动作）")
+    add_jsonl_option(p_chat)
+    p_chat.add_argument("--message", required=True, help="VM 原始自然语言指令")
+    p_chat.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_chat.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+    p_chat.add_argument("--file",      help="附件路径")
 
     # resume
     p_resume = sub.add_parser("resume", help="从 dialog checkpoint 恢复执行")
@@ -841,6 +902,7 @@ COMMAND_MAP = {
     "test-email": cmd_test_email,
     "contract-info-email": cmd_contract_info_email,
     "contract":   cmd_contract,
+    "chat":       cmd_chat,
     "resume":     cmd_resume,
     "waiting":    cmd_waiting,
 }

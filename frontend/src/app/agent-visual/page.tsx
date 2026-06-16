@@ -248,6 +248,12 @@ export default function AgentVisualPage() {
   const latestUsageReport = [...runEvents].reverse().find((event) => event.event_type === "usage_report");
   const latestUsage = latestUsageReport?.payload;
   const latestCheckpointSummary = latestRunCheckpoint?.payload.summary as Record<string, unknown> | undefined;
+  const latestCheckpointToken =
+    typeof latestRunCheckpoint?.payload.checkpoint_token === "string"
+      ? latestRunCheckpoint.payload.checkpoint_token
+      : typeof latestRunCheckpoint?.payload.token === "string"
+        ? latestRunCheckpoint.payload.token
+        : "";
   const latestRunStarted = runEvents.find((event) => event.event_type === "run_started");
   const latestStepInput = [...runEvents].reverse().find((event) => event.event_type === "step_input");
   const latestRunMode =
@@ -291,6 +297,7 @@ export default function AgentVisualPage() {
     latestCheckpointKind === "resume" &&
     latestRunMode === "production" &&
     !latestRunHasDryRunFlag &&
+    latestCheckpointToken.startsWith("ckpt-") &&
     !isCheckpointWriting;
   const confirmDisabledReason = !latestRunCheckpoint
     ? "请先运行并生成 checkpoint"
@@ -300,7 +307,9 @@ export default function AgentVisualPage() {
         ? "当前运行模式不是 production"
         : latestRunHasDryRunFlag
           ? "事件流显示本次为 dry-run/未写回"
-          : "";
+          : !latestCheckpointToken.startsWith("ckpt-")
+            ? "当前 checkpoint 缺少 CLI token"
+            : "";
   const canEditReview = canConfirmAdvance;
   const usageTotalTokens = formatUsageNumber(latestUsage?.total_tokens);
   const usageInputTokens = formatUsageNumber(latestUsage?.input_tokens);
@@ -499,22 +508,6 @@ export default function AgentVisualPage() {
     });
   }
 
-  function inferUiAction(text: string): AgentRunRequest["action"] {
-    const normalized = text.trim();
-    const sentSignal = /已发送|已发出|已经发送|已经发出|人工发送|标记.*发送/.test(normalized);
-    const contractInfoSignal = /签约信息|合同信息收集|收集合同信息|签约资料|收款信息/.test(normalized);
-    if (sentSignal && contractInfoSignal) return "contract-info-mark-sent";
-    if (contractInfoSignal) return "contract-info-email";
-    if (sentSignal && /测试/.test(normalized)) return "test-email-mark-sent";
-    if (/发.*测试|测试题|测试稿|测试邀请|测试邮件/.test(normalized)) return "test-email";
-    if (/签字|签署|核查|检查.*合同|签回/.test(normalized)) return "signed-contract-check";
-    if (/准备合同|生成合同|发合同|合同草稿/.test(normalized)) return "contract-generate";
-    if (/重算评分|重跑评分|重新评分/.test(normalized)) return "score";
-    if (/看|查|简历|处理|评估|初筛/.test(normalized)) return "resume-evaluate";
-    if (/状态|推进|财务登记/.test(normalized)) return "update-status";
-    return undefined;
-  }
-
   function isAttachmentOnlyInput(text: string) {
     const attachments = inferAttachmentPaths(text);
     if (attachments.length === 0) return false;
@@ -529,11 +522,8 @@ export default function AgentVisualPage() {
     return `已定位 ${candidate.name}（${candidate.id}）。当前 Lark 尚未写入评分结果，下一步是简历评估节点：下载简历附件、解析信息、计算评分并写回 Lark。评分结果写回后，工作台会进入人工确认。`;
   }
 
-  function workflowLocator(text: string, candidate?: Candidate): AgentRunRequest["candidateLocator"] {
+  function workflowLocator(candidate?: Candidate): AgentRunRequest["candidateLocator"] {
     if (!candidate) return undefined;
-    if (/合同|签字|核查|检查/.test(text)) {
-      return { type: "name", value: candidate.name };
-    }
     return { type: "record_id", value: candidate.recordId };
   }
 
@@ -556,10 +546,10 @@ export default function AgentVisualPage() {
 
     const requestBody: AgentRunRequest = {
       message: text,
-      candidateLocator: workflowLocator(text, candidate),
+      candidateLocator: workflowLocator(candidate),
       attachments: inferAttachmentPaths(text),
       mode: runMode,
-      action: options.action
+      action: options.action ?? "chat"
     };
 
     try {
@@ -616,7 +606,7 @@ export default function AgentVisualPage() {
     appendChat("agent", `进入批量简历评估队列：共 ${batch.length} 条。系统会逐条执行同一个后端简历评估节点，并保留事件流。`);
     for (const [index, candidate] of batch.entries()) {
       appendChat("agent", `批量进度 ${index + 1}/${batch.length}：开始处理 ${candidate.name}（${candidate.id}）。`);
-      await runAgentCommand(text, candidate, { appendOnly: true, action: inferUiAction(text) });
+      await runAgentCommand(text, candidate, { appendOnly: true, action: "resume-evaluate" });
     }
     appendChat("agent", `批量队列执行完毕：共处理 ${batch.length} 条。请按每条 checkpoint 复核结果。`);
     setIsRunningAgent(false);
@@ -628,7 +618,6 @@ export default function AgentVisualPage() {
     const text = command.trim();
     if (!text) return;
     appendChat("vm", text);
-    const action = inferUiAction(text);
     const attachments = inferAttachmentPaths(text);
 
     if (pendingCommand && isAttachmentOnlyInput(text)) {
@@ -640,7 +629,7 @@ export default function AgentVisualPage() {
         return;
       }
       setSelectedId(pendingCandidate.id);
-      await runAgentCommand(`${pendingCommand.prompt} ${text}`, pendingCandidate, { action: pendingCommand.action });
+      await runAgentCommand(`${pendingCommand.prompt} ${text}`, pendingCandidate, { action: pendingCommand.action ?? "chat" });
       return;
     }
 
@@ -654,30 +643,19 @@ export default function AgentVisualPage() {
       return;
     }
 
-    if (action && action !== "resume-evaluate" && action !== "score" && action !== "update-status") {
-      const matched = findCandidateFromText(text) || selected;
-      if (matched) setSelectedId(matched.id);
-      if (!matched) {
-        appendChat("agent", "该节点需要先定位候选人。请在指令里带上候选人姓名、编号或 record_id。");
-        return;
-      }
-      await runAgentCommand(text, matched, { action });
-      return;
-    }
-
     const matched = findCandidateFromText(text) || selected;
-    if (matched && (action === "resume-evaluate" || action === "score" || /看|查|简历|处理|评估/.test(text))) {
+    if (matched) {
       setSelectedId(matched.id);
-      await runAgentCommand(text, matched, { action });
+      await runAgentCommand(text, matched, { action: "chat" });
       return;
     }
 
-    if (attachments.length > 0 && !action) {
-      appendChat("agent", "已识别到附件路径，但没有识别到要执行的动作。请说明是发测试题、检查签字合同，还是用于其他节点。");
+    if (attachments.length > 0) {
+      appendChat("agent", "已识别到附件路径，但当前没有候选人上下文。请先选择候选人，或在指令里带上候选人姓名。");
       return;
     }
 
-    appendChat("agent", "无法识别要执行的资源管理动作。请明确说明：看简历/评估、发测试题、准备合同、检查签字合同，或查看待解析简历。");
+    await runAgentCommand(text, undefined, { action: "chat" });
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -751,10 +729,8 @@ export default function AgentVisualPage() {
     try {
       checkpointResult = await writeCheckpoint({
         action: "confirm",
-        checkpointSummary: latestCheckpointSummary,
-        checkpointKind: latestCheckpointKind,
+        checkpointToken: latestCheckpointToken,
         runId: latestRunCheckpoint.run_id,
-        candidateName: selected.name,
         mode: latestRunMode
       });
     } catch (error) {
@@ -810,13 +786,11 @@ export default function AgentVisualPage() {
     try {
       checkpointResult = await writeCheckpoint({
         action: "modify",
+        checkpointToken: latestCheckpointToken,
         rating: reviewRating,
         aiSuggestion: reviewSuggestion,
         reason: reviewReason,
-        checkpointSummary: latestCheckpointSummary,
-        checkpointKind: latestCheckpointKind,
         runId: latestRunCheckpoint?.run_id,
-        candidateName: selected.name,
         mode: latestRunMode
       });
     } catch (error) {
@@ -1011,10 +985,9 @@ export default function AgentVisualPage() {
           <div className="visual-chat-input">
           <div className="quick-actions">
               <button disabled={isRunningAgent} onClick={() => void runCommand("看一下所有还没解析的简历")} type="button">待解析简历</button>
-              <button disabled={isRunningAgent || !selected} onClick={() => selected && void runCommand(`看下${selected.name}的简历`)} type="button">看当前简历</button>
-              {["发测试题", "准备合同", "检查签字合同"].map((item) => (
-                <button disabled={isRunningAgent || !selected} key={item} onClick={() => selected && void runCommand(`${item}：${selected.name}`)} type="button">{item}</button>
-              ))}
+              <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("看当前候选人简历", selected, { action: "resume-evaluate" })} type="button">看当前简历</button>
+              <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("给当前候选人准备测试题邮件", selected, { action: "test-email" })} type="button">发测试题</button>
+              <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("给当前候选人准备合同", selected, { action: "contract-generate" })} type="button">准备合同</button>
               <button disabled={!canEditReview} onClick={() => setCheckpointMode("editing")} title={canEditReview ? "进入真实写回修改" : confirmDisabledReason} type="button">修改结果</button>
             </div>
             <form onSubmit={handleSubmit}>

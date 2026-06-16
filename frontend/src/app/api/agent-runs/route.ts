@@ -1,18 +1,31 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { NextRequest } from "next/server";
-import { createEventFactory, planAgentRun, type AgentRunEvent, type AgentRunRequest } from "@/lib/agent-runner";
-import { readConfigNestedValue } from "@/lib/lark-data-access";
+import type { AgentRunEvent, AgentRunRequest } from "@/lib/agent-runner";
+import { getSkillRoot } from "@/lib/lark-data-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const SKILL_ROOT = getSkillRoot();
+const RUN_DIALOG = `${SKILL_ROOT}/scripts/run_dialog.py`;
+
+type CliJsonlEvent = {
+  type?: string;
+  event_type?: string;
+  run_id?: string;
+  event_id?: string;
+  ts?: string;
+  source?: string;
+  action?: string;
+  step?: string;
+  candidate?: { name?: string; record_id?: string };
+  error?: { message?: string; code?: string; recoverable?: boolean; raw_output?: string };
+  [key: string]: unknown;
+};
+
 function encodeEvent(event: AgentRunEvent) {
   return new TextEncoder().encode(`${JSON.stringify(event)}\n`);
-}
-
-function safeCommandForDisplay(script: string, args: string[]) {
-  return ["python3", script, ...args].join(" ");
 }
 
 function redactSensitiveText(text: string) {
@@ -26,640 +39,199 @@ function redactSensitiveText(text: string) {
     .replace(/(乙方地址\s*→\s*).+/g, "$1[个人地址已脱敏]");
 }
 
-function numberFromConfig(section: string, key: string) {
-  const raw = readConfigNestedValue(section, key);
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : undefined;
+function requestedCommand(request: AgentRunRequest) {
+  const action = request.action;
+  const commandByAction: Record<string, string> = {
+    chat: "chat",
+    "resume-evaluate": "score",
+    score: "score",
+    "test-email": "test-email",
+    "contract-info-email": "contract-info-email",
+    "contract-generate": "contract"
+  };
+  return action ? commandByAction[action] : "";
 }
 
-function configuredLlmInfo() {
+function locatorArgs(request: AgentRunRequest) {
+  const locator = request.candidateLocator;
+  if (!locator?.value) return [];
+  if (locator.type === "record_id") return ["--record-id", locator.value];
+  if (locator.type === "name" || locator.type === "nickname" || locator.type === "email") {
+    return ["--name", locator.value];
+  }
+  return [];
+}
+
+function cliArgs(request: AgentRunRequest, runId: string) {
+  const command = requestedCommand(request);
+  if (!command) return [];
+  const args = [RUN_DIALOG, command, "--jsonl", "--run-id", runId, ...locatorArgs(request)];
+  if (command === "chat") {
+    args.push("--message", request.message);
+  }
+  const attachment = request.attachments?.find(Boolean);
+  if (attachment && (command === "test-email" || command === "chat")) {
+    args.push("--file", attachment);
+  }
+  return args;
+}
+
+function payloadFromCli(event: CliJsonlEvent) {
+  const {
+    type,
+    event_type,
+    run_id,
+    event_id,
+    ts,
+    source,
+    candidate,
+    ...payload
+  } = event;
+  return payload;
+}
+
+function eventTypeFromCli(event: CliJsonlEvent): AgentRunEvent["event_type"] {
+  const type = event.type ?? event.event_type;
+  if (type === "tool_output") return "tool_call_output";
+  if (type === "error") return "step_failed";
+  return (type ?? "agent_message") as AgentRunEvent["event_type"];
+}
+
+function eventFromCli(event: CliJsonlEvent, fallbackRunId: string, sequence: number): AgentRunEvent {
   return {
-    provider: readConfigNestedValue("llm", "provider") || "unknown",
-    model: readConfigNestedValue("llm", "model") || "unknown",
-    inputUsdPerMillion:
-      numberFromConfig("llm", "input_cost_per_1m_usd") ??
-      numberFromConfig("llm", "input_cost_usd_per_1m"),
-    outputUsdPerMillion:
-      numberFromConfig("llm", "output_cost_per_1m_usd") ??
-      numberFromConfig("llm", "output_cost_usd_per_1m"),
-    cnyPerUsd: numberFromConfig("llm", "cny_per_usd") ?? 7.2
+    event_id: event.event_id || `evt_${String(sequence).padStart(4, "0")}`,
+    run_id: event.run_id || fallbackRunId,
+    event_type: eventTypeFromCli(event),
+    timestamp: event.ts || new Date().toISOString(),
+    candidate_record_id: event.candidate?.record_id,
+    candidate_name: event.candidate?.name,
+    step_name: typeof event.step === "string" ? event.step : undefined,
+    payload: payloadFromCli(event)
   };
 }
 
-function estimateTokensFromChars(chars: number) {
-  if (!Number.isFinite(chars) || chars <= 0) return 0;
-  return Math.ceil(chars / 2.2);
-}
-
-function parseUsageFromOutput(outputText: string) {
-  const promptTokens =
-    outputText.match(/["']prompt_tokens["']\s*:\s*(\d+)/)?.[1] ??
-    outputText.match(/["']input_tokens["']\s*:\s*(\d+)/)?.[1] ??
-    outputText.match(/\binput_tokens\s*[=:]\s*(\d+)/i)?.[1];
-  const completionTokens =
-    outputText.match(/["']completion_tokens["']\s*:\s*(\d+)/)?.[1] ??
-    outputText.match(/["']output_tokens["']\s*:\s*(\d+)/)?.[1] ??
-    outputText.match(/\boutput_tokens\s*[=:]\s*(\d+)/i)?.[1];
-  if (!promptTokens && !completionTokens) return undefined;
-  return {
-    inputTokens: Number(promptTokens ?? 0),
-    outputTokens: Number(completionTokens ?? 0)
-  };
-}
-
-function estimateAiUsage({
-  action,
-  outputText,
-  message,
-  runId,
-  candidateName,
-  candidateRecordId
-}: {
-  action: string;
-  outputText: string;
-  message: string;
-  runId: string;
-  candidateName?: string;
-  candidateRecordId?: string;
-}) {
-  const llm = configuredLlmInfo();
-  const apiUsage = parseUsageFromOutput(outputText);
-  const hasLlmSignal =
-    action === "score" ||
-    action === "resume-evaluate" ||
-    /LLM|OpenAI-compatible|DeepSeek|Claude|GPT|解析简历|PDF\s+\d+\s+字符/i.test(outputText);
-  const parsedPdfChars = Number(outputText.match(/PDF\s+(\d+)\s+字符/)?.[1] ?? outputText.match(/PDF 解析成功（(\d+)字符）/)?.[1]);
-  const estimatedInputChars = Number.isFinite(parsedPdfChars)
-    ? Math.min(parsedPdfChars, 8000) + 1200
-    : message.length + 1200;
-  const estimatedOutputChars = Math.min(outputText.length, 4000);
-  const inputTokens = apiUsage?.inputTokens ?? (hasLlmSignal ? estimateTokensFromChars(estimatedInputChars) : 0);
-  const outputTokens = apiUsage?.outputTokens ?? (hasLlmSignal ? estimateTokensFromChars(estimatedOutputChars) : 0);
-  const totalTokens = inputTokens + outputTokens;
-  const canPrice = llm.inputUsdPerMillion !== undefined && llm.outputUsdPerMillion !== undefined;
-  const costUsd = canPrice
-    ? (inputTokens / 1_000_000) * llm.inputUsdPerMillion! + (outputTokens / 1_000_000) * llm.outputUsdPerMillion!
-    : undefined;
-
-  return {
-    run_id: runId,
-    candidate_name: candidateName,
-    candidate_record_id: candidateRecordId,
-    action,
-    provider: llm.provider,
-    model: llm.model,
-    usage_source: apiUsage ? "api_returned" : hasLlmSignal ? "estimated" : "not_applicable",
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
-    total_tokens: totalTokens,
-    cost_usd: costUsd === undefined ? null : Number(costUsd.toFixed(6)),
-    cost_cny: costUsd === undefined ? null : Number((costUsd * llm.cnyPerUsd).toFixed(4)),
-    input_cost_per_1m_usd: llm.inputUsdPerMillion ?? null,
-    output_cost_per_1m_usd: llm.outputUsdPerMillion ?? null,
-    pricing_status: canPrice ? "priced" : hasLlmSignal ? "missing_unit_price" : "not_applicable",
-    note: canPrice
-      ? "成本按 config.local.yaml 中 llm 单价估算。"
-      : hasLlmSignal
-        ? "已统计 token；未配置 llm.input_cost_per_1m_usd / output_cost_per_1m_usd，因此不估算金额。"
-        : "本步骤未检测到 LLM 调用信号，AI token 记为 0。"
-  };
-}
-
-type BusinessResult =
-  | { status: "success"; reason?: string; error_type?: string }
-  | { status: "failed" | "partial_failed"; reason: string; error_type: string; next: string };
-
-function analyzeBusinessResult(outputText: string): BusinessResult {
-  const normalized = outputText.replace(/\r/g, "");
-
-  const summary =
-    normalized.match(/(?:全部)?完成：成功\s*(\d+)\s*\|\s*跳过\s*(\d+)\s*\|\s*失败\s*(\d+)/) ??
-    normalized.match(/完成：成功\s*(\d+)\s*\|\s*跳过\s*(\d+)\s*\|\s*失败\s*(\d+)/);
-  if (summary) {
-    const ok = Number(summary[1]);
-    const failed = Number(summary[3]);
-    if (failed > 0 && ok === 0) {
-      return {
-        status: "failed",
-        reason: `脚本进程已结束，但业务结果为失败：成功 ${ok}，失败 ${failed}。`,
-        error_type: "business_summary_failed",
-        next: "请先处理上方 tool 输出中的失败原因；系统不会生成成功 checkpoint 或继续推进。"
-      };
-    }
-    if (failed > 0) {
-      return {
-        status: "partial_failed",
-        reason: `脚本进程已结束，但业务结果为部分失败：成功 ${ok}，失败 ${failed}。`,
-        error_type: "business_summary_partial_failed",
-        next: "请复核失败记录；本次不会生成统一成功 checkpoint。"
-      };
-    }
-  }
-
-  const failurePatterns: Array<[RegExp, string]> = [
-    [/LLM\s*返回失败|调用异常.*LLM|OpenAI-compatible LLM HTTP|invalid_api_key|Authentication Fails/i, "llm_call_failed"],
-    [/重试\s*\d+\s*次(?:均)?失败|尝试\s*\d+\s*次失败/i, "retry_failed"],
-    [/表结构读取失败|not_found|缺失字段/i, "lark_schema_failed"],
-    [/未找到\s*(?:record_id|姓名|候选人)|候选人主表未找到|合同信息表未找到/i, "record_resolve_failed"],
-    [/已取消|用户取消|状态未更新|未收到明确人工决策/i, "user_cancelled"]
-  ];
-  for (const [pattern, errorType] of failurePatterns) {
-    if (pattern.test(normalized)) {
-      return {
-        status: "failed",
-        reason: "脚本输出中包含明确失败信号，不能按成功流程继续。",
-        error_type: errorType,
-        next: "请根据失败信号修复配置、LLM key、Lark 映射或候选人定位后重试。"
-      };
-    }
-  }
-
-  return { status: "success" };
-}
-
-function numberLike(value: string) {
-  const parsed = Number(value.replace(/,/g, "").trim());
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function inferResumeConfidence({
-  wordCountSource,
-  parsedChars,
-  explicitWordCount,
-  parseResultFound
-}: {
-  wordCountSource: string;
-  parsedChars: string;
-  explicitWordCount: boolean;
-  parseResultFound: boolean;
-}) {
-  if (explicitWordCount || wordCountSource === "明确字数") {
-    return "高（识别到明确翻译字数）";
-  }
-  if (wordCountSource === "混合估算") {
-    return "中 ⚠️ 字数基于混合估算";
-  }
-  if (wordCountSource === "年限估算" || wordCountSource === "项目数估算") {
-    return `中低 ⚠️ 字数基于${wordCountSource.replace("估算", "")}估算`;
-  }
-  const parsedCharCount = numberLike(parsedChars);
-  if (parseResultFound && parsedCharCount && parsedCharCount >= 800) {
-    return "中高（PDF解析成功，已提取结构化字段）";
-  }
-  if (parsedCharCount && parsedCharCount >= 800) {
-    return "中（PDF解析成功，但缺少明确字数来源）";
-  }
-  if (parsedCharCount && parsedCharCount > 0) {
-    return "低 ⚠️ PDF文本较短，建议人工确认";
-  }
-  return "低 ⚠️ 未识别到稳定字数依据";
-}
-
-function normalizeValidResume(value?: string) {
-  if (!value) return "未识别";
-  const normalized = value.trim();
-  if (/✅|是|true|有效/i.test(normalized)) return "是";
-  if (/❌|否|false|无效/i.test(normalized)) return "否";
-  return normalized;
-}
-
-function buildCheckpointPayload(
-  action: string,
-  fallback: { title: string; detail: string },
-  outputText: string,
+function systemEvent(
   runId: string,
-  requestedMode: string,
-  effectiveMode: string,
-  candidateName?: string,
-  candidateRecordId?: string
-) {
-  const isDryRun = effectiveMode === "dry_run";
-  if (action === "test-email") {
-    const recipient = outputText.match(/收件人：(.+)/)?.[1]?.trim() ?? "未识别";
-    const attachment = outputText.match(/附\s+件：(.+)/)?.[1]?.trim() ?? "未识别";
-    const subject = outputText.match(/主\s+题：(.+)/)?.[1]?.trim() ?? "未识别";
-    const testModeRecipient = outputText.match(/实际发到：(.+?)（/)?.[1]?.trim();
-    const dryRun = isDryRun || outputText.includes("[DRY-RUN]");
-
-    return {
-      title: "测试题邮件待确认",
-      detail:
-        `${candidateName ?? "该候选人"} 的测试题邮件已生成预览：主题「${subject}」，附件「${attachment}」。\n` +
-        `当前收件人显示为 ${recipient}${testModeRecipient ? `；TEST_MODE 实际会发到 ${testModeRecipient}` : ""}。\n` +
-        `${dryRun ? "当前是 dry-run，未发送邮件、未写回飞书。" : "当前已执行发送动作。"} VM 确认后，正式流程会发送/生成草稿，并写回 Lark 字段：招募状态、测试发送时间、workflow_log。`,
-      required: true,
-      summary: {
-        run_id: runId,
-        requested_mode: requestedMode,
-        execution_mode: effectiveMode,
-        candidate_name: candidateName,
-        candidate_record_id: candidateRecordId,
-        subject,
-        recipient,
-        test_mode_recipient: testModeRecipient,
-        attachment,
-        dry_run: dryRun,
-        email_sent: !dryRun
-      },
-      writeback_fields_after_confirm: ["招募状态", "测试发送时间", "workflow_log"]
-    };
-  }
-
-  if (action === "contract-generate") {
-    const contractRecordId = outputText.match(/=== 候选人：.+?\s+\((rec[^)]+)\)/)?.[1] ?? "未识别";
-    const selectedTemplate = outputText.match(/已选模板：(.+)/)?.[1]?.trim() ?? "未识别";
-    const requiredVars = outputText.match(/所需变量（(\d+) 个）/)?.[1] ?? "未识别";
-    const filledVars = outputText.match(/已成功填充（(\d+) 个）/)?.[1] ?? "未识别";
-    const bankNameWarning = outputText.match(/银行账户名：(.+)/)?.[1]?.trim();
-    const dryRun = isDryRun || outputText.includes("[DRY-RUN]");
-
-    return {
-      title: "合同草稿待确认",
-      detail:
-        `${candidateName ?? "该候选人"} 的合同信息已完成 dry-run 检查：使用合同信息表 record_id=${contractRecordId}。\n` +
-        `已选择模板「${selectedTemplate}」，变量填充 ${filledVars}/${requiredVars}。${bankNameWarning ? `风险提示：${bankNameWarning}。` : ""}\n` +
-        `${dryRun ? "当前是 dry-run，未生成文件、未发送邮件、未写回飞书。" : "当前已执行合同生成动作。"} VM 确认后，正式流程会生成合同草稿/预览，并写入 workflow_log；发送合同仍需人工确认。`,
-      required: true,
-      summary: {
-        run_id: runId,
-        requested_mode: requestedMode,
-        execution_mode: effectiveMode,
-        candidate_name: candidateName,
-        candidate_record_id: candidateRecordId,
-        contract_record_id: contractRecordId,
-        selected_template: selectedTemplate,
-        required_variables: requiredVars,
-        filled_variables: filledVars,
-        warning: bankNameWarning,
-        dry_run: dryRun,
-        contract_file_generated: !dryRun
-      },
-      writeback_fields_after_confirm: ["合同草稿文件", "workflow_log"]
-    };
-  }
-
-  if (action !== "score" && action !== "resume-evaluate") {
-    return {
-      title: fallback.title,
-      detail: fallback.detail,
-      required: true,
-      summary: {
-        run_id: runId,
-        requested_mode: requestedMode,
-        execution_mode: effectiveMode,
-        candidate_name: candidateName,
-        candidate_record_id: candidateRecordId,
-        dry_run: isDryRun
-      }
-    };
-  }
-
-  const scorePart = "([0-9.]+\\/[0-9.]+)";
-  const labeledScore = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?总分[：:]\s*([0-9.]+)(?:\s*\/\s*100)?/);
-  const labeledTier = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?档位[：:]\s*([A-Z])/);
-  const labeledValid =
-    outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?有效简历[：:]\s*([^\n\r]+)/) ??
-    outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?有效[：:=]\s*([^\s\n\r]+)/);
-  const rationaleLine = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?(?:依据|评分依据)[：:]\s*([^\n\r]+)/);
-  const scoreLine = outputText.match(
-    new RegExp(
-      `价格:\\s*${scorePart}\\s+资历:\\s*${scorePart}\\s+微调:\\s*([+-]?\\d+)\\s+初始档:\\s*([A-Z])\\s*→\\s*最终档:\\s*([A-Z])\\s+总分:\\s*([0-9.]+)`
-    )
-  );
-  const v2ScoreLine = outputText.match(
-    new RegExp(
-      `总分:\\s*([0-9.]+)\\/100\\s+档位:\\s*([A-Z])\\s*→\\s*([A-Z])\\s+价格:\\s*${scorePart}\\s+资历:\\s*${scorePart}\\s+微调:\\s*([+-]?\\d+)`
-    )
-  );
-  const validLine = outputText.match(/有效简历判定:\s*([^\n]+?)\s*（(.+?)）/);
-  const dryRunLine = outputText.match(/\[DRY-RUN\]\s*record=([^\s]+)\s+总分=(\d+)\s+初始评级=([A-Z])/);
-  const pdfLine =
-    outputText.match(/PDF 解析成功（(\d+)字符）/) ??
-    outputText.match(/PDF\s*解析成功[，,]\s*提取到约?\s*([\d,]+)\s*字符/);
-  const evaluationSummary = outputText.match(
-    /PDF\s+(\d+)\s+字符[\s\S]*?总分=([0-9.]+)\s+档位=([A-Z])\s+有效=([^\s]+)\s+字数来源=\[([^\]]+)\]\s+置信度=\[([^\]]+)\]/
-  );
-  const llmStructuredLine = outputText.match(/✅\s*字数=([^\s]+)\s+年限=([^\s]+)\s+项目数=([^\s]+)[\s\S]*?总分=([0-9.]+)\s+档位=([A-Z])\s+有效=([^\s]+)\s+字数来源=\[([^\]]+)\]\s+置信度=\[([^\]]+)\]/);
-  const parseResultLine = outputText.match(/解析结果:\s*字数=([^\s]+)\s+年限=([^\s]+)\s+项目数=([^\s]+)\s+知名实体=([^\n\r]*)/);
-  const aiSuggestionLine = outputText.match(/AI建议[:=]\s*(.+)/);
-  const commentLine = outputText.match(/点评[:=]\s*(.+)/);
-
-  const explicitWordCount = outputText.match(/(?:识别到|约|超过|累计)?\s*([\d,.]+)\s*(万|百万|million|m)?\s*字(?!符)/i);
-  const totalScore = evaluationSummary?.[2] ?? llmStructuredLine?.[4] ?? v2ScoreLine?.[1] ?? scoreLine?.[6] ?? dryRunLine?.[2] ?? labeledScore?.[1] ?? "未识别";
-  const finalTier = evaluationSummary?.[3] ?? llmStructuredLine?.[5] ?? v2ScoreLine?.[3] ?? scoreLine?.[5] ?? dryRunLine?.[3] ?? labeledTier?.[1] ?? "未识别";
-  const initialTier = v2ScoreLine?.[2] ?? scoreLine?.[4] ?? finalTier;
-  const validResumeRaw = evaluationSummary?.[4] ?? llmStructuredLine?.[6] ?? validLine?.[1]?.trim() ?? labeledValid?.[1]?.trim();
-  const validResume = normalizeValidResume(validResumeRaw);
-  const evidence = validLine?.[2]?.trim() ?? rationaleLine?.[1]?.trim() ?? "未识别";
-  const parsedChars = evaluationSummary?.[1] ?? pdfLine?.[1]?.replace(/,/g, "") ?? "未识别";
-  const recordId = dryRunLine?.[1] ?? candidateRecordId ?? "未识别";
-  const wordCountSource =
-    evaluationSummary?.[5] ??
-    llmStructuredLine?.[7] ??
-    (explicitWordCount ? "明确字数" : parseResultLine ? "LLM解析写回" : parsedChars !== "未识别" ? "PDF解析文本" : "未提供");
-  const confidence =
-    evaluationSummary?.[6] ??
-    llmStructuredLine?.[8] ??
-    inferResumeConfidence({ wordCountSource, parsedChars, explicitWordCount: Boolean(explicitWordCount), parseResultFound: Boolean(parseResultLine) });
-  const extractedWordCount = llmStructuredLine?.[1] ?? parseResultLine?.[1] ?? explicitWordCount?.[0]?.trim() ?? "未识别";
-  const years = llmStructuredLine?.[2] ?? parseResultLine?.[2] ?? "未识别";
-  const projectCount = llmStructuredLine?.[3] ?? parseResultLine?.[3] ?? "未识别";
-  const aiSuggestion = aiSuggestionLine?.[1]?.trim() ?? "未识别";
-  const comment = commentLine?.[1]?.trim() ?? "未识别";
-
+  sequence: number,
+  event_type: AgentRunEvent["event_type"],
+  payload: Record<string, unknown>
+): AgentRunEvent {
   return {
-    title: "简历评估结果待确认",
-    detail:
-      `${candidateName ?? "该候选人"} 的简历评估节点已完成${isDryRun ? "预览" : "写回"}：总分 ${totalScore}，评级 ${finalTier}，有效简历=${validResume}。\n` +
-      `本次读取 record_id=${recordId}，PDF 文本 ${parsedChars} 字符；字数来源=${wordCountSource}，置信度=${confidence}。\n` +
-      (isDryRun
-        ? "VM 确认后，正式执行会写回 Lark 字段：总分、初始评级、评分依据、AI建议、有效简历和 workflow_log。"
-        : "本次已由底层脚本按 production 写回评分字段；该 checkpoint 只用于复核和审计留痕。"),
-    required: true,
-    summary: {
-      run_id: runId,
-      requested_mode: requestedMode,
-      execution_mode: effectiveMode,
-      candidate_name: candidateName,
-      candidate_record_id: recordId,
-      total_score: totalScore,
-      final_tier: finalTier,
-      initial_tier: initialTier,
-      valid_resume: validResume,
-      parsed_pdf_chars: parsedChars,
-      extracted_word_count: extractedWordCount,
-      years,
-      project_count: projectCount,
-      word_count_source: wordCountSource,
-      confidence,
-      ai_suggestion: aiSuggestion,
-      comment,
-      evidence
-    },
-    writeback_fields_after_confirm: [
-      "总分",
-      "初始评级",
-      "评分依据",
-      "AI建议",
-      "有效简历",
-      "workflow_log"
-    ]
+    event_id: `evt_sys_${String(sequence).padStart(4, "0")}`,
+    run_id: runId,
+    event_type,
+    timestamp: new Date().toISOString(),
+    payload
   };
 }
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as AgentRunRequest;
   const runId = `run_${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;
-  const plan = planAgentRun(body);
-  const event = createEventFactory(runId, plan);
+  const args = cliArgs(body, runId);
 
   const stream = new ReadableStream({
     start(controller) {
-      const recentOutput: Array<{ stream: "stdout" | "stderr"; text: string }> = [];
-      const outputChunks: string[] = [];
+      let sequence = 0;
 
-      function send(nextEvent: AgentRunEvent) {
-        controller.enqueue(encodeEvent(nextEvent));
+      function send(event: AgentRunEvent) {
+        controller.enqueue(encodeEvent(event));
       }
 
-      function rememberOutput(stream: "stdout" | "stderr", text: string) {
-        recentOutput.push({ stream, text });
-        if (recentOutput.length > 8) recentOutput.shift();
+      function sendSystem(event_type: AgentRunEvent["event_type"], payload: Record<string, unknown>) {
+        sequence += 1;
+        send(systemEvent(runId, sequence, event_type, payload));
       }
 
-      send(
-        event("run_started", {
-          message: body.message,
-          mode: plan.effectiveMode,
-          requested_mode: plan.requestedMode,
-          execution_mode: plan.effectiveMode,
-          mode_note: plan.modeNote,
-          note: "本次执行由后端适配层调用现有 Agent 脚本，前端只展示真实事件。"
-        })
-      );
-
-      if (plan.action === "unknown") {
-        send(
-          event("step_failed", {
-            reason: "无法从 VM 指令中识别要执行的单点动作。",
-            next: "请明确说明：评分、发测试题、准备合同、检查签字合同、推进状态或导出 Badcase。"
-          })
-        );
-        send(event("run_done", { status: "failed" }));
+      if (!existsSync(RUN_DIALOG)) {
+        sendSystem("step_failed", {
+          reason: "CLI 入口不存在，无法启动资源管理 Agent。",
+          script: RUN_DIALOG,
+          expected_root: SKILL_ROOT
+        });
+        sendSystem("run_done", { status: "failed" });
         controller.close();
         return;
       }
 
-      send(
-        event("candidate_resolved", {
-          candidate_name: plan.candidateName ?? "未从指令中识别姓名",
-          candidate_record_id: plan.candidateRecordId ?? "未提供 record_id",
-          locator_policy: "优先 record_id，其次姓名/昵称/邮箱；若多条命中，生产版必须暂停让 VM 选择。"
-        })
-      );
-
-      if (plan.validationErrors && plan.validationErrors.length > 0) {
-        send(
-          event("step_failed", {
-            reason: "执行前置条件不满足。",
-            validation_errors: plan.validationErrors,
-            next: "请补充候选人定位、附件路径或目标状态后重试；系统不会用猜测结果继续执行。"
-          })
-        );
-        send(event("run_done", { status: "failed" }));
+      if (args.length === 0) {
+        sendSystem("step_failed", {
+          reason: "当前前端请求没有提供可映射到 CLI 的固定 action。",
+          next: "Thin GUI Wrapper 阶段 server 不做意图识别；请由前端按钮或 CLI chat 入口提供明确命令。"
+        });
+        sendSystem("run_done", { status: "failed" });
         controller.close();
         return;
       }
 
-      if (plan.waitingInput) {
-        send(
-          event(
-            "waiting_input",
-            {
-              ...plan.waitingInput,
-              action: plan.action,
-              candidate_name: plan.candidateName,
-              candidate_record_id: plan.candidateRecordId
-            },
-            plan.action
-          )
-        );
-        send(event("run_done", { status: "waiting_input" }));
-        controller.close();
-        return;
-      }
-
-      if (!plan.script || !existsSync(plan.script)) {
-        send(
-          event("step_failed", {
-            reason: "现有 Agent 脚本不存在或路径不可访问。",
-            script: plan.script,
-            expected_root: process.env.LOC_AGENT_SKILL_ROOT ?? "~/.agents/skills/loc-resume-screening"
-          })
-        );
-        send(event("run_done", { status: "failed" }));
-        controller.close();
-        return;
-      }
-
-      for (const warning of plan.warnings ?? []) {
-        send(event("warning", { message: warning }, plan.action));
-      }
-
-      send(
-        event(
-          "step_started",
-          {
-            action: plan.action,
-            source: "existing_agent_script",
-            workflow_version: plan.workflowVersion,
-            script_role: plan.scriptRole,
-            is_legacy: plan.isLegacy ?? false,
-            note: "本步骤只调用现有脚本，不在前端或 API 层重写业务逻辑。"
-          },
-          plan.action
-        )
-      );
-
-      send(
-        event(
-          "step_input",
-          {
-            script: plan.script,
-            args: plan.args,
-            command_preview: safeCommandForDisplay(plan.script, plan.args),
-            workflow_version: plan.workflowVersion,
-            script_role: plan.scriptRole,
-            is_legacy: plan.isLegacy ?? false,
-            safety:
-              plan.effectiveMode === "dry_run"
-                ? "当前实际执行为 dry-run：不会发送邮件、不会写业务主表、不会生成正式合同文件。"
-                : "当前实际执行为 production：底层脚本可能写回业务主表；事件流会按真实副作用展示。"
-          },
-          plan.action
-        )
-      );
-
-      send(
-        event(
-          "tool_call_started",
-          {
-            tool: "existing_agent_script",
-            command_preview: safeCommandForDisplay(plan.script, plan.args)
-          },
-          plan.action
-        )
-      );
-
-      const child = spawn("python3", [plan.script, ...plan.args], {
-        cwd: process.env.LOC_AGENT_SKILL_ROOT ?? `${process.env.HOME || "~"}/.agents/skills/loc-resume-screening`,
+      const child = spawn("python3", args, {
+        cwd: SKILL_ROOT,
         env: {
           ...process.env,
           PYTHONUNBUFFERED: "1"
         }
       });
+      let stdoutBuffer = "";
+      let stderrBuffer = "";
 
       child.stdout.on("data", (chunk: Buffer) => {
-        const text = redactSensitiveText(chunk.toString("utf8"));
-        outputChunks.push(text);
-        rememberOutput("stdout", text);
-        send(event("tool_call_output", { stream: "stdout", text }, plan.action));
+        stdoutBuffer += chunk.toString("utf8");
+        const lines = stdoutBuffer.split("\n");
+        stdoutBuffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const cliEvent = JSON.parse(line) as CliJsonlEvent;
+            sequence += 1;
+            send(eventFromCli(cliEvent, runId, sequence));
+          } catch {
+            sequence += 1;
+            send(
+              systemEvent(runId, sequence, "tool_call_output", {
+                stream: "stdout",
+                text: redactSensitiveText(line)
+              })
+            );
+          }
+        }
       });
 
       child.stderr.on("data", (chunk: Buffer) => {
         const text = redactSensitiveText(chunk.toString("utf8"));
-        outputChunks.push(text);
-        rememberOutput("stderr", text);
-        send(event("tool_call_output", { stream: "stderr", text }, plan.action));
+        stderrBuffer += text;
+        sendSystem("tool_call_output", { stream: "stderr", text });
       });
 
       child.on("error", (error) => {
-        send(event("step_failed", { reason: error.message }, plan.action));
-        send(event("run_done", { status: "failed" }));
+        sendSystem("step_failed", {
+          reason: "CLI 进程启动失败。",
+          error: error.message
+        });
+        sendSystem("run_done", { status: "failed" });
         controller.close();
       });
 
       child.on("close", (code) => {
-        const outputText = outputChunks.join("");
-        const businessResult = analyzeBusinessResult(outputText);
-        send(
-          event(
-            "usage_report",
-            estimateAiUsage({
-              action: plan.action,
-              outputText,
-              message: body.message,
-              runId,
-              candidateName: plan.candidateName,
-              candidateRecordId: plan.candidateRecordId
-            }),
-            plan.action
-          )
-        );
-        if (code === 0 && businessResult.status === "success") {
-          send(
-            event(
-              "step_done",
-              {
-                exit_code: code,
-                requested_mode: plan.requestedMode,
-                execution_mode: plan.effectiveMode,
-                business_writeback:
-                  plan.effectiveMode === "production" &&
-                  (plan.action === "score" ||
-                    plan.action === "resume-evaluate" ||
-                    plan.action === "test-email-mark-sent" ||
-                    plan.action === "contract-info-mark-sent"),
-                email_sent: plan.effectiveMode === "production" && plan.action === "test-email",
-                contract_file_generated: plan.effectiveMode === "production" && plan.action === "contract-generate"
-              },
-              plan.action
-            )
-          );
-          if (plan.checkpointAfterSuccess) {
-            send(
-              event(
-                "checkpoint",
-                buildCheckpointPayload(
-                  plan.action,
-                  plan.checkpointAfterSuccess,
-                  outputChunks.join(""),
-                  runId,
-                  plan.requestedMode,
-                  plan.effectiveMode,
-                  plan.candidateName,
-                  plan.candidateRecordId
-                ),
-                plan.action
-              )
-            );
+        if (stdoutBuffer.trim()) {
+          try {
+            const cliEvent = JSON.parse(stdoutBuffer.trim()) as CliJsonlEvent;
+            sequence += 1;
+            send(eventFromCli(cliEvent, runId, sequence));
+          } catch {
+            sendSystem("tool_call_output", {
+              stream: "stdout",
+              text: redactSensitiveText(stdoutBuffer)
+            });
           }
-          send(event("run_done", { status: "done" }));
-        } else {
-          send(
-            event(
-              "step_failed",
-              {
-                exit_code: code,
-                business_status: businessResult.status,
-                reason:
-                  businessResult.status === "success"
-                    ? "脚本进程返回非零退出码。"
-                    : businessResult.reason,
-                error_type:
-                  businessResult.status === "success"
-                    ? "process_exit_failed"
-                    : businessResult.error_type,
-                recent_output: recentOutput,
-                next:
-                  businessResult.status === "success"
-                    ? "请根据 stderr/stdout 修复配置、附件路径或 Lark 映射后重试。"
-                    : businessResult.next
-              },
-              plan.action
-            )
-          );
-          send(event("run_done", { status: "failed" }));
+        }
+        if (code !== 0) {
+          sendSystem("step_failed", {
+            reason: "CLI 进程返回非零退出码。",
+            exit_code: code,
+            stderr: stderrBuffer.slice(-2000)
+          });
+          sendSystem("run_done", { status: "failed" });
         }
         controller.close();
       });
