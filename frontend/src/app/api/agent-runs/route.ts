@@ -177,6 +177,44 @@ function analyzeBusinessResult(outputText: string): BusinessResult {
   return { status: "success" };
 }
 
+function numberLike(value: string) {
+  const parsed = Number(value.replace(/,/g, "").trim());
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function inferResumeConfidence({
+  wordCountSource,
+  parsedChars,
+  explicitWordCount,
+  parseResultFound
+}: {
+  wordCountSource: string;
+  parsedChars: string;
+  explicitWordCount: boolean;
+  parseResultFound: boolean;
+}) {
+  if (explicitWordCount || wordCountSource === "明确字数") {
+    return "高（识别到明确翻译字数）";
+  }
+  if (wordCountSource === "混合估算") {
+    return "中 ⚠️ 字数基于混合估算";
+  }
+  if (wordCountSource === "年限估算" || wordCountSource === "项目数估算") {
+    return `中低 ⚠️ 字数基于${wordCountSource.replace("估算", "")}估算`;
+  }
+  const parsedCharCount = numberLike(parsedChars);
+  if (parseResultFound && parsedCharCount && parsedCharCount >= 800) {
+    return "中高（PDF解析成功，已提取结构化字段）";
+  }
+  if (parsedCharCount && parsedCharCount >= 800) {
+    return "中（PDF解析成功，但缺少明确字数来源）";
+  }
+  if (parsedCharCount && parsedCharCount > 0) {
+    return "低 ⚠️ PDF文本较短，建议人工确认";
+  }
+  return "低 ⚠️ 未识别到稳定字数依据";
+}
+
 function buildCheckpointPayload(
   action: string,
   fallback: { title: string; detail: string },
@@ -269,6 +307,10 @@ function buildCheckpointPayload(
   }
 
   const scorePart = "([0-9.]+\\/[0-9.]+)";
+  const labeledScore = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?总分[：:]\s*([0-9.]+)(?:\s*\/\s*100)?/);
+  const labeledTier = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?档位[：:]\s*([A-Z])/);
+  const labeledValid = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?有效简历[：:]\s*([^\n\r]+)/);
+  const rationaleLine = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?(?:依据|评分依据)[：:]\s*([^\n\r]+)/);
   const scoreLine = outputText.match(
     new RegExp(
       `价格:\\s*${scorePart}\\s+资历:\\s*${scorePart}\\s+微调:\\s*([+-]?\\d+)\\s+初始档:\\s*([A-Z])\\s*→\\s*最终档:\\s*([A-Z])\\s+总分:\\s*([0-9.]+)`
@@ -281,7 +323,9 @@ function buildCheckpointPayload(
   );
   const validLine = outputText.match(/有效简历判定:\s*([^\n]+?)\s*（(.+?)）/);
   const dryRunLine = outputText.match(/\[DRY-RUN\]\s*record=([^\s]+)\s+总分=(\d+)\s+初始评级=([A-Z])/);
-  const pdfLine = outputText.match(/PDF 解析成功（(\d+)字符）/);
+  const pdfLine =
+    outputText.match(/PDF 解析成功（(\d+)字符）/) ??
+    outputText.match(/PDF\s*解析成功[，,]\s*提取到约?\s*([\d,]+)\s*字符/);
   const evaluationSummary = outputText.match(
     /PDF\s+(\d+)\s+字符[\s\S]*?总分=([0-9.]+)\s+档位=([A-Z])\s+有效=([^\s]+)\s+字数来源=\[([^\]]+)\]\s+置信度=\[([^\]]+)\]/
   );
@@ -290,16 +334,23 @@ function buildCheckpointPayload(
   const aiSuggestionLine = outputText.match(/AI建议[:=]\s*(.+)/);
   const commentLine = outputText.match(/点评[:=]\s*(.+)/);
 
-  const totalScore = evaluationSummary?.[2] ?? llmStructuredLine?.[4] ?? v2ScoreLine?.[1] ?? scoreLine?.[6] ?? dryRunLine?.[2] ?? "未识别";
-  const finalTier = evaluationSummary?.[3] ?? llmStructuredLine?.[5] ?? v2ScoreLine?.[3] ?? scoreLine?.[5] ?? dryRunLine?.[3] ?? "未识别";
+  const explicitWordCount = outputText.match(/(?:识别到|约|超过|累计)?\s*([\d,.]+)\s*(万|百万|million|m)?\s*字(?!符)/i);
+  const totalScore = evaluationSummary?.[2] ?? llmStructuredLine?.[4] ?? v2ScoreLine?.[1] ?? scoreLine?.[6] ?? dryRunLine?.[2] ?? labeledScore?.[1] ?? "未识别";
+  const finalTier = evaluationSummary?.[3] ?? llmStructuredLine?.[5] ?? v2ScoreLine?.[3] ?? scoreLine?.[5] ?? dryRunLine?.[3] ?? labeledTier?.[1] ?? "未识别";
   const initialTier = v2ScoreLine?.[2] ?? scoreLine?.[4] ?? finalTier;
-  const validResume = evaluationSummary?.[4] ?? llmStructuredLine?.[6] ?? validLine?.[1]?.trim() ?? "未识别";
-  const evidence = validLine?.[2]?.trim() ?? "未识别";
-  const parsedChars = evaluationSummary?.[1] ?? pdfLine?.[1] ?? "未识别";
+  const validResume = evaluationSummary?.[4] ?? llmStructuredLine?.[6] ?? validLine?.[1]?.trim() ?? labeledValid?.[1]?.trim() ?? "未识别";
+  const evidence = validLine?.[2]?.trim() ?? rationaleLine?.[1]?.trim() ?? "未识别";
+  const parsedChars = evaluationSummary?.[1] ?? pdfLine?.[1]?.replace(/,/g, "") ?? "未识别";
   const recordId = dryRunLine?.[1] ?? candidateRecordId ?? "未识别";
-  const wordCountSource = evaluationSummary?.[5] ?? llmStructuredLine?.[7] ?? (parseResultLine ? "LLM解析写回" : "未提供");
-  const confidence = evaluationSummary?.[6] ?? llmStructuredLine?.[8] ?? (parseResultLine ? "高（已提取结构化字段）" : "未提供");
-  const extractedWordCount = llmStructuredLine?.[1] ?? parseResultLine?.[1] ?? "未识别";
+  const wordCountSource =
+    evaluationSummary?.[5] ??
+    llmStructuredLine?.[7] ??
+    (explicitWordCount ? "明确字数" : parseResultLine ? "LLM解析写回" : parsedChars !== "未识别" ? "PDF解析文本" : "未提供");
+  const confidence =
+    evaluationSummary?.[6] ??
+    llmStructuredLine?.[8] ??
+    inferResumeConfidence({ wordCountSource, parsedChars, explicitWordCount: Boolean(explicitWordCount), parseResultFound: Boolean(parseResultLine) });
+  const extractedWordCount = llmStructuredLine?.[1] ?? parseResultLine?.[1] ?? explicitWordCount?.[0]?.trim() ?? "未识别";
   const years = llmStructuredLine?.[2] ?? parseResultLine?.[2] ?? "未识别";
   const projectCount = llmStructuredLine?.[3] ?? parseResultLine?.[3] ?? "未识别";
   const aiSuggestion = aiSuggestionLine?.[1]?.trim() ?? "未识别";
