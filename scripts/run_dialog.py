@@ -24,6 +24,8 @@ import argparse
 import subprocess
 import threading
 import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).parent
@@ -34,6 +36,65 @@ from schema_gate import assert_schema_ready
 
 # ── 工具：结构化输出 ──────────────────────────────────────────────────────────
 
+JSONL_MODE = False
+CURRENT_RUN_ID = ""
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="milliseconds")
+
+
+def new_event_id() -> str:
+    return f"evt_{uuid.uuid4().hex[:12]}"
+
+
+def new_run_id() -> str:
+    return f"run_{uuid.uuid4().hex[:12]}"
+
+
+def build_jsonl_event(event_type: str, *, run_id: str | None = None, payload: dict | None = None, **fields) -> dict:
+    """Build one CLI-owned event for Thin GUI Wrapper streaming."""
+    event = {
+        "type": event_type,
+        "event_type": event_type,
+        "run_id": run_id or CURRENT_RUN_ID or new_run_id(),
+        "event_id": new_event_id(),
+        "ts": now_iso(),
+        "source": "cli",
+    }
+    if payload is not None:
+        event["payload"] = payload
+    event.update(fields)
+    return event
+
+
+def checkpoint_type_for(command: str, node: str | None = None) -> str:
+    node = node or ""
+    mapping = {
+        "score": "resume",
+        "test-email": "test_email",
+        "contract-info-email": "contract_info_email",
+        "contract": "contract",
+        "resume": "generic",
+        "waiting": "generic",
+    }
+    if "测试题" in node or "测试邮件" in node:
+        return "test_email"
+    if "签约信息" in node or "合同信息" in node:
+        return "contract_info_email"
+    if "合同" in node:
+        return "contract"
+    if "简历" in node or "评分" in node or "飞书" in node:
+        return "resume"
+    return mapping.get(command, "generic")
+
+
+def emit_jsonl_event(event_type: str, *, payload: dict | None = None, **fields):
+    """Emit exactly one JSON object per stdout line."""
+    print(json.dumps(build_jsonl_event(event_type, payload=payload, **fields), ensure_ascii=False, separators=(",", ":")))
+    sys.stdout.flush()
+
+
 def emit(data: dict):
     """向 stdout 输出纯 JSON，确保换行结束"""
     print(json.dumps(data, ensure_ascii=False, indent=2))
@@ -41,6 +102,19 @@ def emit(data: dict):
 
 
 def emit_error(message: str, raw_output: str = ""):
+    if JSONL_MODE:
+        emit_jsonl_event(
+            "error",
+            status="failed",
+            error={
+                "code": "cli_error",
+                "message": message,
+                "recoverable": True,
+                "raw_output": raw_output[:2000],
+            },
+        )
+        emit_jsonl_event("run_done", status="failed")
+        return
     emit({
         "status":     "error",
         "message":    message,
@@ -49,6 +123,15 @@ def emit_error(message: str, raw_output: str = ""):
 
 
 def emit_done(candidate: str, message: str, raw_output: str = ""):
+    if JSONL_MODE:
+        emit_jsonl_event(
+            "run_done",
+            status="done",
+            candidate={"name": candidate},
+            message=message,
+            raw_output=raw_output[:2000],
+        )
+        return
     emit({
         "status":     "done",
         "candidate":  candidate,
@@ -293,7 +376,7 @@ def cmd_contract(args):
     elif args.name:
         cmd += ["--name", args.name]
 
-    _run_simple(cmd, candidate)
+    _run_simple(cmd, candidate, args)
 
 
 # ── 子命令：resume ────────────────────────────────────────────────────────────
@@ -395,6 +478,18 @@ def cmd_waiting(args):
         emit_error(f"读取待决策列表失败：{e}")
         return
 
+    if JSONL_MODE:
+        emit_jsonl_event(
+            "waiting_input",
+            action=args.command,
+            step=args.command,
+            status="waiting" if rows else "empty",
+            waiting=rows,
+            message=f"当前有 {len(rows)} 条待决策记录" if rows else "当前没有等待人工决策的候选人",
+        )
+        emit_jsonl_event("run_done", status="done", count=len(rows))
+        return
+
     emit({
         "status": "done",
         "candidate": "",
@@ -411,6 +506,13 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
     找到 ⏸ [CHECKPOINT] 行后立即返回 checkpoint JSON。
     """
     try:
+        emit_jsonl_event(
+            "step_started",
+            action=args.command,
+            step=args.command,
+            title=f"执行 {args.command}",
+            candidate={"name": candidate},
+        ) if JSONL_MODE else None
         proc = subprocess.Popen(
             cmd,
             cwd=str(SKILL_DIR),
@@ -435,6 +537,14 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
     for line in proc.stdout:
         line_stripped = line.rstrip()
         collected_lines.append(line_stripped)
+        if JSONL_MODE and line_stripped:
+            emit_jsonl_event(
+                "tool_output",
+                action=args.command,
+                step=args.command,
+                stream="stdout",
+                text=line_stripped,
+            )
 
         # 检测 CHECKPOINT 行
         m = CHECKPOINT_RE.search(line_stripped)
@@ -478,6 +588,23 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
         if checkpoint_node and ("测试题邮件" in checkpoint_node or "签约信息收集邮件" in checkpoint_node):
             options = ["保存草稿", "取消"]
 
+        if JSONL_MODE:
+            emit_jsonl_event(
+                "checkpoint",
+                action=args.command,
+                step=args.command,
+                status="waiting_confirmation",
+                token=checkpoint_token,
+                checkpoint_token=checkpoint_token,
+                checkpoint_type=checkpoint_type_for(args.command, checkpoint_node),
+                title=checkpoint_node,
+                candidate={"name": candidate_display},
+                summary=summary,
+                allowed_actions=options,
+                raw_output=raw_output[:2000],
+            )
+            emit_jsonl_event("run_done", status="waiting_confirmation", token=checkpoint_token)
+            return
         emit({
             "status":            "checkpoint",
             "checkpoint_token":  checkpoint_token,
@@ -511,12 +638,19 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
             emit_done(candidate_display, msg, raw_output)
 
 
-def _run_simple(cmd: list, candidate: str):
+def _run_simple(cmd: list, candidate: str, args=None):
     """
     简单运行脚本，等待完成后输出 JSON。
     用于无 checkpoint 的脚本（test-email、contract）。
     """
     try:
+        emit_jsonl_event(
+            "step_started",
+            action=getattr(args, "command", "simple"),
+            step=getattr(args, "command", "simple"),
+            title="执行脚本",
+            candidate={"name": candidate},
+        ) if JSONL_MODE else None
         result = subprocess.run(
             cmd,
             cwd=str(SKILL_DIR),
@@ -533,6 +667,16 @@ def _run_simple(cmd: list, candidate: str):
         return
 
     raw = (result.stdout + result.stderr).strip()
+    if JSONL_MODE and raw:
+        for line in raw.splitlines():
+            if line.strip():
+                emit_jsonl_event(
+                    "tool_output",
+                    action=getattr(args, "command", "simple"),
+                    step=getattr(args, "command", "simple"),
+                    stream="stdout",
+                    text=line.rstrip(),
+                )
 
     if result.returncode != 0:
         emit_error(f"脚本执行失败（exit={result.returncode}）", raw)
@@ -593,38 +737,51 @@ def build_parser() -> argparse.ArgumentParser:
   resume      python3 scripts/run_dialog.py resume --token ckpt-xxx --decision "写入"
         """,
     )
+    parser.add_argument("--jsonl", action="store_true", help="以 JSONL event 流输出（Thin GUI Wrapper 使用）")
+    parser.add_argument("--run-id", dest="run_id", help="指定 run_id；默认自动生成")
 
     sub = parser.add_subparsers(dest="command", title="子命令")
     sub.required = True
 
+    def add_jsonl_option(p):
+        p.add_argument("--jsonl", action="store_true", default=argparse.SUPPRESS, help="以 JSONL event 流输出（Thin GUI Wrapper 使用）")
+        p.add_argument("--run-id", dest="run_id", default=argparse.SUPPRESS, help="指定 run_id；默认自动生成")
+        return p
+
     # score
     p_score = sub.add_parser("score", help="评分写回（rescore_and_write_v2.py）")
+    add_jsonl_option(p_score)
     p_score.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_score.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
 
     # test-email
     p_email = sub.add_parser("test-email", help="发测试题邮件")
+    add_jsonl_option(p_email)
     p_email.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_email.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
     p_email.add_argument("--file",      required=True, help="测试题 PDF 路径")
 
     # contract-info-email
     p_contract_info = sub.add_parser("contract-info-email", help="发送签约信息收集邮件")
+    add_jsonl_option(p_contract_info)
     p_contract_info.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_contract_info.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
 
     # contract
     p_contract = sub.add_parser("contract", help="生成合同")
+    add_jsonl_option(p_contract)
     p_contract.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_contract.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
 
     # resume
     p_resume = sub.add_parser("resume", help="从 dialog checkpoint 恢复执行")
+    add_jsonl_option(p_resume)
     p_resume.add_argument("--token",    required=True, help="checkpoint token（格式：ckpt-xxx）")
     p_resume.add_argument("--decision", required=True, help="决策内容（如 '写入' 或 '跳过'）")
 
     # waiting
     p_waiting = sub.add_parser("waiting", help="列出等待人工决策的 checkpoint")
+    add_jsonl_option(p_waiting)
     p_waiting.add_argument("--limit", type=int, default=50, help="最多读取多少条")
 
     return parser
@@ -641,14 +798,33 @@ COMMAND_MAP = {
 
 
 def main():
+    global JSONL_MODE, CURRENT_RUN_ID
     parser = build_parser()
     args   = parser.parse_args()
+    JSONL_MODE = bool(getattr(args, "jsonl", False))
+    CURRENT_RUN_ID = getattr(args, "run_id", "") or new_run_id()
 
     handler = COMMAND_MAP.get(args.command)
     if handler is None:
         parser.print_help()
         sys.exit(1)
 
+    if JSONL_MODE:
+        emit_jsonl_event(
+            "run_started",
+            action=args.command,
+            step=args.command,
+            mode_requested="cli",
+            mode_effective="cli",
+            input={
+                "command": args.command,
+                "name": getattr(args, "name", None),
+                "record_id": getattr(args, "record_id", None),
+                "file": getattr(args, "file", None),
+                "token": getattr(args, "token", None),
+                "decision": getattr(args, "decision", None),
+            },
+        )
     handler(args)
 
 
