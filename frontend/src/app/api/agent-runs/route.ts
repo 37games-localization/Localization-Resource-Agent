@@ -46,8 +46,14 @@ function requestedCommand(request: AgentRunRequest) {
     "resume-evaluate": "score",
     score: "score",
     "test-email": "test-email",
+    "test-email-mark-sent": "test-email-mark-sent",
     "contract-info-email": "contract-info-email",
-    "contract-generate": "contract"
+    "contract-info-mark-sent": "contract-info-mark-sent",
+    "contract-generate": "contract",
+    "signed-contract-check": "signed-contract",
+    "update-status": "update-status",
+    "rejection-email": "rejection-email",
+    "badcase": "badcase"
   };
   return action ? commandByAction[action] : "";
 }
@@ -70,8 +76,11 @@ function cliArgs(request: AgentRunRequest, runId: string) {
     args.push("--message", request.message);
   }
   const attachment = request.attachments?.find(Boolean);
-  if (attachment && (command === "test-email" || command === "chat")) {
+  if (attachment && (command === "test-email" || command === "signed-contract" || command === "chat")) {
     args.push("--file", attachment);
+  }
+  if (command === "update-status" && request.targetStatus) {
+    args.push("--status", request.targetStatus);
   }
   return args;
 }

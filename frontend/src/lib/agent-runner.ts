@@ -9,6 +9,8 @@ export type AgentAction =
   | "contract-generate"
   | "signed-contract-check"
   | "update-status"
+  | "rejection-email"
+  | "badcase"
   | "unknown";
 
 export type AgentRunRequest = {
@@ -20,6 +22,7 @@ export type AgentRunRequest = {
   attachments?: string[];
   mode?: "dry_run" | "production" | "test_mode";
   action?: AgentAction;
+  targetStatus?: string;
 };
 
 export type AgentRunMode = "dry_run" | "production";

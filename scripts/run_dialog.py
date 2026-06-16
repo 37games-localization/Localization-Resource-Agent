@@ -74,7 +74,13 @@ def checkpoint_type_for(command: str, node: str | None = None) -> str:
         "score": "resume",
         "test-email": "test_email",
         "contract-info-email": "contract_info_email",
+        "test-email-mark-sent": "test_email",
+        "contract-info-mark-sent": "contract_info_email",
         "contract": "contract",
+        "signed-contract": "signed_contract",
+        "update-status": "status",
+        "rejection-email": "rejection_email",
+        "badcase": "badcase",
         "resume": "generic",
         "waiting": "generic",
     }
@@ -94,7 +100,13 @@ def writeback_fields_for(command: str) -> list[str]:
         "score": ["score", "rating", "ai_suggestion", "confidence", "resume_valid", "recruitment_status"],
         "test-email": ["recruitment_status", "workflow_log"],
         "contract-info-email": ["recruitment_status", "workflow_log"],
+        "test-email-mark-sent": ["recruitment_status", "workflow_log"],
+        "contract-info-mark-sent": ["recruitment_status", "workflow_log"],
         "contract": ["contract_file", "workflow_log"],
+        "signed-contract": ["recruitment_status", "workflow_log"],
+        "update-status": ["recruitment_status", "workflow_log"],
+        "rejection-email": ["recruitment_status", "workflow_log"],
+        "badcase": ["badcase_snapshot", "workflow_log"],
         "resume": ["workflow_log"],
     }
     return mapping.get(command, ["workflow_log"])
@@ -107,6 +119,8 @@ def error_code_for(message: str) -> str:
         return "missing_candidate"
     if "请提供 --file" in message:
         return "missing_attachment"
+    if "请提供 --status" in message:
+        return "missing_target_status"
     if "请提供 --token" in message:
         return "missing_checkpoint_token"
     if "请提供 --decision" in message:
@@ -128,15 +142,19 @@ def infer_chat_command(message: str) -> str | None:
     sent_signal = re.search(r"已发送|已发出|已经发送|已经发出|人工发送|标记.*发送", normalized)
     contract_info_signal = re.search(r"签约信息|合同信息收集|收集合同信息|签约资料|收款信息", normalized)
     if sent_signal and contract_info_signal:
-        return "contract-info-email"
+        return "contract-info-mark-sent"
     if contract_info_signal:
         return "contract-info-email"
     if sent_signal and "测试" in normalized:
-        return "test-email"
+        return "test-email-mark-sent"
     if re.search(r"发.*测试|测试题|测试稿|测试邀请|测试邮件", normalized):
         return "test-email"
     if re.search(r"签字|签署|核查|检查.*合同|签回", normalized):
-        return None
+        return "signed-contract"
+    if re.search(r"badcase|Badcase|坏例|问题回流|标.*问题", normalized):
+        return "badcase"
+    if re.search(r"婉拒|拒绝|发拒信|拒信|不通过", normalized):
+        return "rejection-email"
     if re.search(r"准备合同|生成合同|发合同|合同草稿", normalized):
         return "contract"
     if re.search(r"重算评分|重跑评分|重新评分", normalized):
@@ -144,7 +162,7 @@ def infer_chat_command(message: str) -> str | None:
     if re.search(r"看|查|简历|处理|评估|初筛", normalized):
         return "score"
     if re.search(r"状态|推进|财务登记", normalized):
-        return None
+        return "update-status"
     return None
 
 
@@ -178,6 +196,28 @@ def emit_error(message: str, raw_output: str = "", *, code: str | None = None, r
         "status":     "error",
         "message":    message,
         "raw_output": raw_output[:2000],
+    })
+
+
+def emit_waiting_input(field: str, prompt: str, *, action: str | None = None, accept: list[str] | None = None, candidate: str = ""):
+    if JSONL_MODE:
+        emit_jsonl_event(
+            "waiting_input",
+            action=action,
+            step=action,
+            status="waiting_input",
+            field=field,
+            prompt=prompt,
+            accept=accept or [field],
+            candidate={"name": candidate} if candidate else {},
+        )
+        emit_jsonl_event("run_done", status="waiting_input", field=field)
+        return
+    emit({
+        "status": "waiting_input",
+        "field": field,
+        "message": prompt,
+        "candidate": candidate,
     })
 
 
@@ -257,6 +297,18 @@ def extract_candidate_from_output(text: str, fallback: str) -> str:
     return m.group(1) if m else fallback
 
 
+def extract_target_status(message: str) -> str:
+    patterns = [
+        r"(?:状态(?:改成|改为|推进到)?|标记为)([^\s，。；;]+)",
+        r"(财务登记中|财务待登记|财务审批中|已入库|已拒绝|测试中|测试通过|测试未通过|合同信息收集中|合同待生成|合同已发送|等待签署|合同已签署)",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, message or "")
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
 def find_record_id(name: str) -> tuple:
     """
     通过姓名在飞书记录里查找 record_id。
@@ -286,6 +338,23 @@ def find_record_id(name: str) -> tuple:
     else:
         names = ", ".join(f"{m[1]}({m[0]})" for m in matches)
         return None, f"找到多条记录，请用 --record-id 精确指定：{names}"
+
+
+def resolve_candidate(args) -> tuple[str | None, str | None]:
+    """Resolve name/record_id once for wrapper commands."""
+    if not getattr(args, "name", None) and not getattr(args, "record_id", None):
+        emit_error("请提供 --name 或 --record-id")
+        return None, None
+
+    record_id = getattr(args, "record_id", None)
+    candidate = getattr(args, "name", None) or record_id
+    if getattr(args, "name", None) and not record_id:
+        record_id, display = find_record_id(args.name)
+        if record_id is None:
+            emit_error(display)
+            return None, None
+        candidate = display
+    return record_id, candidate
 
 
 # ── 子命令：score ─────────────────────────────────────────────────────────────
@@ -342,7 +411,13 @@ def cmd_test_email(args):
         emit_error("请提供 --name 或 --record-id")
         return
     if not args.file:
-        emit_error("发测试题需要 --file 参数（测试题 PDF 路径）")
+        emit_waiting_input(
+            "attachment",
+            "请提供测试题附件或本地路径。",
+            action=args.command,
+            accept=["file", "local_path"],
+            candidate=args.name or args.record_id or "",
+        )
         return
 
     file_path = Path(args.file).expanduser()
@@ -357,14 +432,9 @@ def cmd_test_email(args):
         emit_error(f"脚本不存在：{script}，请检查路径")
         return
 
-    record_id = args.record_id
-    candidate = args.name or args.record_id
-    if args.name and not record_id:
-        record_id, display = find_record_id(args.name)
-        if record_id is None:
-            emit_error(display)
-            return
-        candidate = display
+    record_id, candidate = resolve_candidate(args)
+    if record_id is None:
+        return
 
     cmd = [sys.executable, str(script)]
     if record_id:
@@ -374,6 +444,21 @@ def cmd_test_email(args):
     cmd += ["--file", str(file_path)]
 
     _run_with_checkpoint(cmd, candidate, args)
+
+
+def cmd_test_email_mark_sent(args):
+    """VM 已人工发送测试题后，只写回状态和流程日志。"""
+    if not ensure_schema_ready("test-email"):
+        return
+    script = SCRIPTS_DIR / "send_test_email_v2.py"
+    if not script.exists():
+        emit_error(f"脚本不存在：{script}，请检查路径")
+        return
+    record_id, candidate = resolve_candidate(args)
+    if record_id is None:
+        return
+    cmd = [sys.executable, str(script), "--record-id", record_id, "--mark-sent", "--yes"]
+    _run_simple(cmd, candidate, args)
 
 
 def cmd_contract_info_email(args):
@@ -407,6 +492,21 @@ def cmd_contract_info_email(args):
     _run_with_checkpoint(cmd, candidate, args)
 
 
+def cmd_contract_info_mark_sent(args):
+    """VM 已人工发送签约信息收集邮件后，只写回状态和流程日志。"""
+    if not ensure_schema_ready("contract-info-email"):
+        return
+    script = SCRIPTS_DIR / "send_contract_info_email_v2.py"
+    if not script.exists():
+        emit_error(f"脚本不存在：{script}，请检查路径")
+        return
+    record_id, candidate = resolve_candidate(args)
+    if record_id is None:
+        return
+    cmd = [sys.executable, str(script), "--record-id", record_id, "--mark-sent", "--yes"]
+    _run_simple(cmd, candidate, args)
+
+
 def cmd_contract(args):
     """调用 generate_contract_v2.py"""
     if not args.name and not args.record_id:
@@ -438,6 +538,97 @@ def cmd_contract(args):
     _run_simple(cmd, candidate, args)
 
 
+def cmd_signed_contract(args):
+    """调用签字合同核查脚本。"""
+    if not args.name and not args.record_id:
+        emit_error("请提供 --name 或 --record-id")
+        return
+    files = getattr(args, "files", None) or ([args.file] if getattr(args, "file", None) else [])
+    if not files:
+        emit_waiting_input(
+            "attachment",
+            "请提供签字合同 PDF 附件或本地路径。",
+            action=args.command,
+            accept=["file", "local_path"],
+            candidate=args.name or args.record_id or "",
+        )
+        return
+    checked_files = []
+    for file in files:
+        file_path = Path(file).expanduser()
+        if not file_path.exists():
+            emit_error(f"附件不存在：{file_path}")
+            return
+        checked_files.append(str(file_path))
+    if not ensure_schema_ready("signed-contract"):
+        return
+    script = SCRIPTS_DIR / "check_signed_contract.py"
+    if not script.exists():
+        emit_error(f"脚本不存在：{script}，请检查路径")
+        return
+    record_id, candidate = resolve_candidate(args)
+    if record_id is None:
+        return
+    cmd = [sys.executable, str(script), "--record-id", record_id]
+    for file_path in checked_files:
+        cmd += ["--file", file_path]
+    # 签字核查正式状态推进仍由脚本内部人工确认；GUI 侧先提供可视化核查结果。
+    cmd += ["--dry-run"]
+    _run_simple(cmd, candidate, args)
+
+
+def cmd_update_status(args):
+    """调用状态推进脚本。"""
+    status = getattr(args, "status", None) or extract_target_status(getattr(args, "message", "") or "")
+    if not status:
+        emit_waiting_input(
+            "target_status",
+            "请提供目标招募状态，例如：状态改成财务登记中。",
+            action=args.command,
+            accept=["target_status"],
+            candidate=getattr(args, "name", None) or getattr(args, "record_id", None) or "",
+        )
+        return
+    if not ensure_schema_ready("update-status"):
+        return
+    script = SCRIPTS_DIR / "update_status.py"
+    if not script.exists():
+        emit_error(f"脚本不存在：{script}，请检查路径")
+        return
+    record_id, candidate = resolve_candidate(args)
+    if record_id is None:
+        return
+    cmd = [sys.executable, str(script), "--record-id", record_id, "--status", status, "--yes"]
+    _run_simple(cmd, candidate, args)
+
+
+def cmd_rejection_email(args):
+    """生成婉拒邮件草稿，避免 GUI 直接发送。"""
+    if not ensure_schema_ready("rejection-email"):
+        return
+    script = SCRIPTS_DIR / "send_rejection_email.py"
+    if not script.exists():
+        emit_error(f"脚本不存在：{script}，请检查路径")
+        return
+    record_id, candidate = resolve_candidate(args)
+    if record_id is None:
+        return
+    cmd = [sys.executable, str(script), "--record-id", record_id, "--draft", "--yes"]
+    _run_simple(cmd, candidate, args)
+
+
+def cmd_badcase(args):
+    """导出并按统一协议上报 Badcase。"""
+    if not ensure_schema_ready("badcase"):
+        return
+    script = SCRIPTS_DIR / "export_badcase_snapshots.py"
+    if not script.exists():
+        emit_error(f"脚本不存在：{script}，请检查路径")
+        return
+    cmd = [sys.executable, str(script)]
+    _run_simple(cmd, getattr(args, "name", None) or getattr(args, "record_id", None) or "badcase", args)
+
+
 def cmd_chat(args):
     """Natural-language CLI entrypoint used by Thin GUI Wrapper."""
     command = infer_chat_command(args.message or "")
@@ -450,6 +641,9 @@ def cmd_chat(args):
         name=args.name,
         record_id=args.record_id,
         file=args.file,
+        files=[args.file] if args.file else [],
+        status=extract_target_status(args.message or ""),
+        message=args.message,
         jsonl=getattr(args, "jsonl", False),
         run_id=getattr(args, "run_id", None),
     )
@@ -459,8 +653,20 @@ def cmd_chat(args):
         cmd_test_email(forwarded)
     elif command == "contract-info-email":
         cmd_contract_info_email(forwarded)
+    elif command == "test-email-mark-sent":
+        cmd_test_email_mark_sent(forwarded)
+    elif command == "contract-info-mark-sent":
+        cmd_contract_info_mark_sent(forwarded)
     elif command == "contract":
         cmd_contract(forwarded)
+    elif command == "signed-contract":
+        cmd_signed_contract(forwarded)
+    elif command == "update-status":
+        cmd_update_status(forwarded)
+    elif command == "rejection-email":
+        cmd_rejection_email(forwarded)
+    elif command == "badcase":
+        cmd_badcase(forwarded)
     else:
         emit_error(f"CLI chat 暂不支持该动作：{command}", code="unsupported_action")
 
@@ -834,8 +1040,14 @@ def build_parser() -> argparse.ArgumentParser:
 示例：
   score       python3 scripts/run_dialog.py score --name "李全鸿"
   test-email  python3 scripts/run_dialog.py test-email --name "测试候选人A" --file ~/test.pdf
+  test-email-mark-sent  python3 scripts/run_dialog.py test-email-mark-sent --name "测试候选人A"
   contract-info-email  python3 scripts/run_dialog.py contract-info-email --name "测试候选人A"
+  contract-info-mark-sent  python3 scripts/run_dialog.py contract-info-mark-sent --name "测试候选人A"
   contract    python3 scripts/run_dialog.py contract --name "测试候选人B"
+  signed-contract python3 scripts/run_dialog.py signed-contract --name "测试候选人B" --file ~/signed.pdf
+  update-status python3 scripts/run_dialog.py update-status --name "测试候选人B" --status "财务登记中"
+  rejection-email python3 scripts/run_dialog.py rejection-email --name "测试候选人C"
+  badcase python3 scripts/run_dialog.py badcase
   resume      python3 scripts/run_dialog.py resume --token ckpt-xxx --decision "写入"
         """,
     )
@@ -863,17 +1075,55 @@ def build_parser() -> argparse.ArgumentParser:
     p_email.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
     p_email.add_argument("--file",      help="测试题 PDF 路径")
 
+    # test-email-mark-sent
+    p_email_mark_sent = sub.add_parser("test-email-mark-sent", help="VM 人工发送测试题后写回状态")
+    add_jsonl_option(p_email_mark_sent)
+    p_email_mark_sent.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_email_mark_sent.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+
     # contract-info-email
     p_contract_info = sub.add_parser("contract-info-email", help="发送签约信息收集邮件")
     add_jsonl_option(p_contract_info)
     p_contract_info.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_contract_info.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
 
+    # contract-info-mark-sent
+    p_contract_info_mark_sent = sub.add_parser("contract-info-mark-sent", help="VM 人工发送签约信息收集邮件后写回状态")
+    add_jsonl_option(p_contract_info_mark_sent)
+    p_contract_info_mark_sent.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_contract_info_mark_sent.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+
     # contract
     p_contract = sub.add_parser("contract", help="生成合同")
     add_jsonl_option(p_contract)
     p_contract.add_argument("--name",      help="候选人姓名（模糊匹配）")
     p_contract.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+
+    # signed-contract
+    p_signed = sub.add_parser("signed-contract", help="核查签字合同")
+    add_jsonl_option(p_signed)
+    p_signed.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_signed.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+    p_signed.add_argument("--file",      action="append", dest="files", help="签字合同 PDF 路径，可多次提供")
+
+    # update-status
+    p_status = sub.add_parser("update-status", help="手动推进候选人招募状态")
+    add_jsonl_option(p_status)
+    p_status.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_status.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+    p_status.add_argument("--status",    help="目标招募状态")
+
+    # rejection-email
+    p_rejection = sub.add_parser("rejection-email", help="生成婉拒邮件草稿")
+    add_jsonl_option(p_rejection)
+    p_rejection.add_argument("--name",      help="候选人姓名（模糊匹配）")
+    p_rejection.add_argument("--record-id", dest="record_id", help="飞书 record_id（精确）")
+
+    # badcase
+    p_badcase = sub.add_parser("badcase", help="导出并上报已标记 Badcase")
+    add_jsonl_option(p_badcase)
+    p_badcase.add_argument("--name",      help="候选人姓名（可选，仅用于展示）")
+    p_badcase.add_argument("--record-id", dest="record_id", help="飞书 record_id（可选，仅用于展示）")
 
     # chat
     p_chat = sub.add_parser("chat", help="自然语言入口（由 CLI 判断资源管理动作）")
@@ -900,8 +1150,14 @@ def build_parser() -> argparse.ArgumentParser:
 COMMAND_MAP = {
     "score":      cmd_score,
     "test-email": cmd_test_email,
+    "test-email-mark-sent": cmd_test_email_mark_sent,
     "contract-info-email": cmd_contract_info_email,
+    "contract-info-mark-sent": cmd_contract_info_mark_sent,
     "contract":   cmd_contract,
+    "signed-contract": cmd_signed_contract,
+    "update-status": cmd_update_status,
+    "rejection-email": cmd_rejection_email,
+    "badcase": cmd_badcase,
     "chat":       cmd_chat,
     "resume":     cmd_resume,
     "waiting":    cmd_waiting,
@@ -932,6 +1188,8 @@ def main():
                 "name": getattr(args, "name", None),
                 "record_id": getattr(args, "record_id", None),
                 "file": getattr(args, "file", None),
+                "files": getattr(args, "files", None),
+                "status": getattr(args, "status", None),
                 "token": getattr(args, "token", None),
                 "decision": getattr(args, "decision", None),
             },
