@@ -160,7 +160,8 @@ function analyzeBusinessResult(outputText: string): BusinessResult {
     [/LLM\s*返回失败|调用异常.*LLM|OpenAI-compatible LLM HTTP|invalid_api_key|Authentication Fails/i, "llm_call_failed"],
     [/重试\s*\d+\s*次(?:均)?失败|尝试\s*\d+\s*次失败/i, "retry_failed"],
     [/表结构读取失败|not_found|缺失字段/i, "lark_schema_failed"],
-    [/未找到\s*(?:record_id|姓名|候选人)|候选人主表未找到|合同信息表未找到/i, "record_resolve_failed"]
+    [/未找到\s*(?:record_id|姓名|候选人)|候选人主表未找到|合同信息表未找到/i, "record_resolve_failed"],
+    [/已取消|用户取消|状态未更新|未收到明确人工决策/i, "user_cancelled"]
   ];
   for (const [pattern, errorType] of failurePatterns) {
     if (pattern.test(normalized)) {
@@ -525,7 +526,10 @@ export async function POST(request: NextRequest) {
                 execution_mode: plan.effectiveMode,
                 business_writeback:
                   plan.effectiveMode === "production" &&
-                  (plan.action === "score" || plan.action === "resume-evaluate"),
+                  (plan.action === "score" ||
+                    plan.action === "resume-evaluate" ||
+                    plan.action === "test-email-mark-sent" ||
+                    plan.action === "contract-info-mark-sent"),
                 email_sent: plan.effectiveMode === "production" && plan.action === "test-email",
                 contract_file_generated: plan.effectiveMode === "production" && plan.action === "contract-generate"
               },

@@ -212,7 +212,7 @@ export async function POST(request: Request) {
       );
     }
     const confirmedFields: Record<string, unknown> = {
-      "招募状态": "初筛通过",
+      "招募状态": "📝 测试题待发",
       "是否Badcase": null,
       "期望结果": null
     };

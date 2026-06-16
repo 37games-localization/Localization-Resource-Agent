@@ -10,11 +10,12 @@ VM 首次配置完后运行，确认一切正常再走 TEST_MODE。
 """
 
 import sys
+import os
 import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_loader import load_config, get_config_path, get_smtp, get_lark, get_llm_api_key, validate_config, is_test_mode, get_test_email
+from config_loader import load_config, get_config_path, get_smtp, get_lark, get_llm_api_key, validate_config, is_test_mode, get_test_email, get_table_ref
 
 # ──────────────────────────────────────────────
 # 新增：基础依赖检查
@@ -109,6 +110,25 @@ def check_lark_tokens(cfg: dict) -> list[tuple[str, bool, str]]:
         ))
 
     return results
+
+
+def pricing_rules_ref_summary(cfg: dict) -> tuple[bool, str]:
+    """Show the effective pricing-rules table reference used by scoring."""
+    lark = get_lark(cfg)
+    pricing = cfg.get("pricing_rules") or {}
+    base, table = get_table_ref(cfg, "pricing_rules")
+    if not table:
+        return False, "未配置评分规则/报价规则表 table_id"
+    if os.environ.get("LOC_PRICING_RULES_TABLE_ID"):
+        source = "环境变量 LOC_PRICING_RULES_*"
+    elif pricing.get("table_id"):
+        source = "config.local.yaml 的 pricing_rules"
+    elif lark.get("rules_table_id"):
+        source = "兼容旧配置 lark.rules_table_id"
+    else:
+        source = "默认简历主表 base_token + rules_table_id"
+    base_note = base[:12] + "…" if base else "未配置"
+    return True, f"{source}：base={base_note} table={table}"
 
 
 # ──────────────────────────────────────────────
@@ -328,6 +348,12 @@ def main():
         print("  然后编辑 config.local.yaml")
         sys.exit(1)
     print("  ✅ 配置文件其余字段完整")
+
+    ok, msg = pricing_rules_ref_summary(cfg)
+    print(f"  {'✅' if ok else '❌'} 评分/报价规则表：{msg}")
+    if not ok:
+        print("\n❌ 评分规则配置缺失，请补齐后重新运行。")
+        sys.exit(1)
 
     # ── Section 3：SMTP 连通性 ────────────────────────────────
     runtime_failed = False

@@ -634,7 +634,7 @@ export default function AgentVisualPage() {
       )
     );
     setCheckpointMode("confirmed");
-    appendChat("agent", `已确认 ${selected.name} 的评分结果，并将招募状态推进到初筛通过。`);
+    appendChat("agent", `已确认 ${selected.name} 的评分结果，并将招募状态推进到测试题待发。`);
     handleToast("评分结果已确认，状态已推进");
     await refreshCandidates();
     await refreshWorkflowTraces(selected);

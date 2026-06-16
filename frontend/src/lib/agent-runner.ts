@@ -6,6 +6,9 @@ export type AgentAction =
   | "resume-evaluate"
   | "score"
   | "test-email"
+  | "test-email-mark-sent"
+  | "contract-info-email"
+  | "contract-info-mark-sent"
   | "contract-generate"
   | "signed-contract-check"
   | "update-status"
@@ -19,6 +22,7 @@ export type AgentRunRequest = {
   };
   attachments?: string[];
   mode?: "dry_run" | "production" | "test_mode";
+  action?: AgentAction;
 };
 
 export type AgentRunMode = "dry_run" | "production";
@@ -84,6 +88,11 @@ type CandidateResolution = {
 };
 
 function inferAction(message: string): AgentAction {
+  const sentSignal = /已发送|已发出|已经发送|已经发出|人工发送|标记.*发送/.test(message);
+  const contractInfoSignal = /签约信息|合同信息收集|收集合同信息|签约资料|收款信息/.test(message);
+  if (sentSignal && contractInfoSignal) return "contract-info-mark-sent";
+  if (contractInfoSignal) return "contract-info-email";
+  if (sentSignal && message.includes("测试")) return "test-email-mark-sent";
   if (message.includes("签字") || message.includes("核查") || message.includes("检查")) return "signed-contract-check";
   if (message.includes("合同")) return "contract-generate";
   if (message.includes("测试")) return "test-email";
@@ -177,6 +186,9 @@ function modeNote(requestedMode: AgentRunMode, effectiveMode: AgentRunMode, acti
   if (action === "score" || action === "resume-evaluate") {
     return "production：调用现有评分脚本正式写回评分字段；本次 checkpoint 只用于审阅，不再重复写回。";
   }
+  if (action === "test-email-mark-sent" || action === "contract-info-mark-sent") {
+    return "production：只写回“人工已发送”状态和 workflow_log，不由前端直接发送邮件。";
+  }
   if (requestedMode === "production") {
     return "production：允许底层脚本执行该节点的真实副作用；不会在事件流中伪装成 dry-run。";
   }
@@ -185,13 +197,17 @@ function modeNote(requestedMode: AgentRunMode, effectiveMode: AgentRunMode, acti
 
 export function planAgentRun(request: AgentRunRequest): PlannedCommand {
   const requestedMode = normalizeAgentRunMode(request.mode);
-  const action = inferAction(request.message);
+  const action = request.action && request.action !== "unknown" ? request.action : inferAction(request.message);
   const candidate =
     action === "contract-generate" || action === "signed-contract-check"
       ? resolveForContractTable(request)
       : resolveForCandidateTable(request);
   const effectiveMode =
-    requestedMode === "production" && (action === "score" || action === "resume-evaluate")
+    requestedMode === "production" &&
+    (action === "score" ||
+      action === "resume-evaluate" ||
+      action === "test-email-mark-sent" ||
+      action === "contract-info-mark-sent")
       ? "production"
       : "dry_run";
   const explicitAttachment = request.attachments?.find(Boolean);
@@ -275,6 +291,75 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
         title: "测试题邮件确认",
         detail: "已使用 VM 提供的附件生成测试题邮件预览。正式发送或 TEST_MODE 发送前必须由 VM 确认。"
       }
+    };
+  }
+
+  if (action === "test-email-mark-sent") {
+    return {
+      action,
+      requestedMode,
+      effectiveMode,
+      modeNote: modeNote(requestedMode, effectiveMode, action),
+      workflowVersion: "v2-test-email-mark-sent",
+      scriptRole: "current_status_writeback",
+      isLegacy: false,
+      candidateName: candidate.name,
+      candidateRecordId: candidate.recordId,
+      script: `${SKILL_ROOT}/scripts/send_test_email_v2.py`,
+      args: [...candidate.args, "--mark-sent", ...modeArgs(effectiveMode)],
+      validationErrors,
+      warnings:
+        requestedMode !== "production"
+          ? ["标记测试题已发送需要 PRODUCTION 模式；当前会以 dry-run 预览。"]
+          : candidate.warnings ?? []
+    };
+  }
+
+  if (action === "contract-info-email") {
+    return {
+      action,
+      requestedMode,
+      effectiveMode,
+      modeNote: modeNote(requestedMode, effectiveMode, action),
+      workflowVersion: "v2-contract-info-email",
+      scriptRole: "current_main_path",
+      isLegacy: false,
+      candidateName: candidate.name,
+      candidateRecordId: candidate.recordId,
+      script: `${SKILL_ROOT}/scripts/send_contract_info_email_v2.py`,
+      args: [...candidate.args, ...modeArgs(effectiveMode)],
+      validationErrors,
+      warnings: [
+        ...(candidate.warnings ?? []),
+        ...(requestedMode === "production"
+          ? ["签约信息收集邮件节点当前由前端生成预览；正式发送后请用“已发送签约信息收集邮件”写回状态。"]
+          : [])
+      ],
+      checkpointAfterSuccess: {
+        title: "签约信息收集邮件确认",
+        detail: "已生成签约信息收集邮件预览。正式发送或生成草稿前必须由 VM 确认。"
+      }
+    };
+  }
+
+  if (action === "contract-info-mark-sent") {
+    return {
+      action,
+      requestedMode,
+      effectiveMode,
+      modeNote: modeNote(requestedMode, effectiveMode, action),
+      workflowVersion: "v2-contract-info-mark-sent",
+      scriptRole: "current_status_writeback",
+      isLegacy: false,
+      candidateName: candidate.name,
+      candidateRecordId: candidate.recordId,
+      script: `${SKILL_ROOT}/scripts/send_contract_info_email_v2.py`,
+      args: [...candidate.args, "--mark-sent", ...modeArgs(effectiveMode)],
+      validationErrors,
+      warnings:
+        requestedMode !== "production"
+          ? ["标记签约信息收集邮件已发送需要 PRODUCTION 模式；当前会以 dry-run 预览。"]
+          : candidate.warnings ?? []
     };
   }
 

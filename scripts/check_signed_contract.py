@@ -38,7 +38,7 @@ from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email
+from config_loader import load_config, get_smtp, get_lark, get_paths, is_test_mode, get_test_email, get_table_ref
 from field_resolver import field_id_or
 from lark_cli_utils import normalize_record_list_data, run_lark_cli_json
 from manual_trace import log_manual_step
@@ -46,9 +46,8 @@ from manual_trace import log_manual_step
 _CFG = load_config()
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
-BASE_TOKEN        = get_lark(_CFG).get("base_token", "")
-TABLE_ID_MAIN     = get_lark(_CFG).get("resume_table_id", "")      # 简历收集主表
-TABLE_ID_CONTRACT = get_lark(_CFG).get("contract_table_id", "")    # 合同信息收集表
+MAIN_BASE_TOKEN, TABLE_ID_MAIN = get_table_ref(_CFG, "candidate")          # 简历收集主表
+CONTRACT_BASE_TOKEN, TABLE_ID_CONTRACT = get_table_ref(_CFG, "contract_info")  # 合同信息收集表
 
 # 飞书字段 ID（主表）
 FLD_NAME   = field_id_or("candidate", "candidate.name", "fldSAfsOJf")
@@ -95,12 +94,12 @@ def extract_text(val):
     text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
     return text
 
-def fetch_records(table_id):
+def fetch_records(base_token, table_id):
     records = []
     page_token = None
     while True:
         args = ["base", "+record-list",
-                "--base-token", BASE_TOKEN,
+                "--base-token", base_token,
                 "--table-id", table_id,
                 "--format", "json", "--limit", "100"]
         if page_token:
@@ -113,10 +112,10 @@ def fetch_records(table_id):
         page_token = db["page_token"]
     return records
 
-def update_record(table_id, record_id, fields: dict):
+def update_record(base_token, table_id, record_id, fields: dict):
     payload = json.dumps(fields, ensure_ascii=False)
     resp = lark_cli("base", "+record-upsert",
-                    "--base-token", BASE_TOKEN,
+                    "--base-token", base_token,
                     "--table-id", table_id,
                     "--record-id", record_id,
                     "--json", payload)
@@ -170,7 +169,7 @@ def analyze_with_vision(file_path: Path) -> dict:
 # ── 一致性核查 ────────────────────────────────────────────────────────────────
 def fetch_contract_info(candidate_name: str) -> dict | None:
     """从合同信息收集表找到对应记录"""
-    records = fetch_records(TABLE_ID_CONTRACT)
+    records = fetch_records(CONTRACT_BASE_TOKEN, TABLE_ID_CONTRACT)
     name_lower = candidate_name.lower()
     for r in records:
         name = extract_text(r["fields"].get(FLD_C_NAME))
@@ -253,7 +252,7 @@ def main():
 
     # ── 1. 找飞书主表记录 ────────────────────────────────────────────────────
     print("拉取飞书记录...")
-    records = fetch_records(TABLE_ID_MAIN)
+    records = fetch_records(MAIN_BASE_TOKEN, TABLE_ID_MAIN)
 
     target = None
     if args.record_id:
@@ -426,7 +425,7 @@ def main():
         sys.exit(0)
 
     print("\n更新飞书状态...")
-    update_record(TABLE_ID_MAIN, target["record_id"], {
+    update_record(MAIN_BASE_TOKEN, TABLE_ID_MAIN, target["record_id"], {
         FLD_STATUS: "✅ 合同已签署",
     })
     print("✅ 招募状态已更新为「✅ 合同已签署」")

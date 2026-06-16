@@ -173,7 +173,7 @@ def main():
         template_rec, template_name = pick_template_for_candidate(
             template_records,
             fields,
-            auto_confirm=args.yes,
+            auto_confirm=args.yes or not sys.stdin.isatty(),
         )
         if not template_rec:
             s.finish(output="❌ 未选择模板", status=StepStatus.FAILED)
@@ -190,6 +190,15 @@ def main():
         # VM 手动输入缺失变量（非 --yes 模式）
         needs_vm = [v for v in required_vars if v in VM_INPUT_VARS]
         if needs_vm and not args.dry_run and not args.yes:
+            if not sys.stdin.isatty():
+                msg = (
+                    "合同变量需要人工补充，但当前运行环境无法交互输入："
+                    + "、".join(f"{v}（{VM_INPUT_VARS[v]}）" for v in needs_vm)
+                )
+                s.finish(output=f"❌ {msg}", status=StepStatus.FAILED)
+                print(f"❌ {msg}")
+                print("请先补齐合同信息表后重试，或在确认可留空时使用 --yes。")
+                sys.exit(1)
             print(f"\n以下变量需要手动输入（直接回车跳过）：")
             for var in needs_vm:
                 hint = VM_INPUT_VARS[var]

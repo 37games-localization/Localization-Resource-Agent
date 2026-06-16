@@ -219,7 +219,6 @@ def upload_snapshot_to_lark(record_id: str, snap: dict, dry_run: bool, quiet: bo
                 "--record-id", record_id,
                 "--field-id", FIELDS["snapshot"],
                 "--file", tmp_path,
-                "--filename", filename,
                 "--format", "json"
             ],
             capture_output=True, text=True
