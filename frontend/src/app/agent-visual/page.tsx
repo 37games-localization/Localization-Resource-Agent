@@ -48,6 +48,9 @@ type ChatMessage = {
   id: string;
   role: "vm" | "agent";
   text: string;
+  kind: "text" | "trace" | "checkpoint" | "error" | "waiting_input";
+  events?: AgentRunEvent[];
+  event?: AgentRunEvent;
 };
 
 type LarkCandidateResource = {
@@ -277,6 +280,7 @@ export default function AgentVisualPage() {
   ];
   const canConfirmAdvance =
     Boolean(latestRunCheckpoint) &&
+    checkpointMode === "pending" &&
     latestCheckpointKind === "resume" &&
     latestRunMode === "production" &&
     !latestRunHasDryRunFlag &&
@@ -290,7 +294,7 @@ export default function AgentVisualPage() {
         : latestRunHasDryRunFlag
           ? "事件流显示本次为 dry-run/未写回"
           : "";
-  const canEditReview = canConfirmAdvance && checkpointMode !== "confirmed";
+  const canEditReview = canConfirmAdvance;
   const usageTotalTokens = formatUsageNumber(latestUsage?.total_tokens);
   const usageInputTokens = formatUsageNumber(latestUsage?.input_tokens);
   const usageOutputTokens = formatUsageNumber(latestUsage?.output_tokens);
@@ -378,6 +382,15 @@ export default function AgentVisualPage() {
     return () => window.clearTimeout(timer);
   }, [chatMessages.length, selectedId, checkpointMode]);
 
+  function handleRunModeChange(nextMode: RunMode) {
+    if (nextMode === runMode) return;
+    setRunMode(nextMode);
+    setRunEvents([]);
+    setCheckpointMode("pending");
+    setReviewReason("");
+    appendChat("agent", `已切换到 ${runModeCopy[nextMode].label}，当前执行过程和 checkpoint 已清空。需要写回时请在新模式下重新执行节点。`);
+  }
+
   function handleCandidateClick(id: string) {
     setSelectedId((current) => (current === id ? "" : id));
     setCheckpointMode("pending");
@@ -390,15 +403,81 @@ export default function AgentVisualPage() {
     window.setTimeout(() => setToast(""), 2400);
   }
 
-  function appendChat(role: ChatMessage["role"], text: string) {
+  function appendMessage(message: Omit<ChatMessage, "id"> & { id?: string }) {
     setChatMessages((current) => [
       ...current,
       {
-        id: `${Date.now()}-${role}-${current.length}`,
-        role,
-        text
+        id: message.id ?? `${Date.now()}-${message.role}-${current.length}`,
+        ...message
       }
     ]);
+  }
+
+  function appendChat(role: ChatMessage["role"], text: string) {
+    appendMessage({ role, text, kind: "text" });
+  }
+
+  function upsertTraceMessage(event: AgentRunEvent) {
+    const traceId = `trace-${event.run_id}`;
+    setChatMessages((current) => {
+      const existingIndex = current.findIndex((message) => message.id === traceId);
+      if (existingIndex === -1) {
+        return [
+          ...current,
+          {
+            id: traceId,
+            role: "agent",
+            kind: "trace",
+            text: "执行过程",
+            events: [event]
+          }
+        ];
+      }
+      return current.map((message, index) =>
+        index === existingIndex
+          ? { ...message, events: [...(message.events ?? []), event] }
+          : message
+      );
+    });
+  }
+
+  function appendEventMessage(event: AgentRunEvent) {
+    if (event.event_type === "checkpoint") {
+      appendMessage({
+        role: "agent",
+        kind: "checkpoint",
+        text: String(event.payload.title ?? "需要人工确认"),
+        event
+      });
+      return;
+    }
+    if (event.event_type === "step_failed") {
+      appendMessage({
+        role: "agent",
+        kind: "error",
+        text: "步骤执行失败",
+        event
+      });
+      return;
+    }
+    if (event.event_type === "waiting_input") {
+      appendMessage({
+        role: "agent",
+        kind: "waiting_input",
+        text: String(event.payload.prompt ?? "需要补充信息后继续。"),
+        event
+      });
+    }
+  }
+
+  function appendBackendTrace(runId: string, events: AgentRunEvent[]) {
+    appendMessage({
+      id: `trace-${runId}-writeback-${Date.now()}`,
+      role: "agent",
+      kind: "trace",
+      text: "后端写回结果",
+      events
+    });
   }
 
   function findCandidateFromText(text: string) {
@@ -430,6 +509,8 @@ export default function AgentVisualPage() {
     if (isRunningAgent && !options.appendOnly) return;
     if (!options.appendOnly) {
       setRunEvents([]);
+      setCheckpointMode("pending");
+      setReviewReason("");
       setIsRunningAgent(true);
     }
     appendChat("agent", candidate
@@ -469,12 +550,8 @@ export default function AgentVisualPage() {
           if (!line.trim()) continue;
           const event = JSON.parse(line) as AgentRunEvent;
           setRunEvents((items) => [...items, event]);
-          if (event.event_type === "checkpoint") {
-            appendChat("agent", String(event.payload.title ?? "需要人工确认"));
-          }
-          if (event.event_type === "step_failed") {
-            appendChat("agent", `执行失败：${stringifyPayload(event.payload)}`);
-          }
+          upsertTraceMessage(event);
+          appendEventMessage(event);
         }
       }
     } catch (error) {
@@ -488,6 +565,7 @@ export default function AgentVisualPage() {
     if (isRunningAgent) return;
     setRunEvents([]);
     setIsRunningAgent(true);
+    setCheckpointMode("pending");
     appendChat("agent", `进入批量简历评估队列：共 ${batch.length} 条。系统会逐条执行同一个后端简历评估节点，并保留事件流。`);
     for (const [index, candidate] of batch.entries()) {
       appendChat("agent", `批量进度 ${index + 1}/${batch.length}：开始处理 ${candidate.name}（${candidate.id}）。`);
@@ -568,10 +646,11 @@ export default function AgentVisualPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ recordId: selected.recordId, ...payload })
     });
-    const result = (await response.json()) as { ok: boolean; error?: string };
+    const result = (await response.json()) as { ok: boolean; error?: string; data?: { events?: AgentRunEvent[] } };
     if (!response.ok || !result.ok) {
       throw new Error(result.error || "Lark 写回失败");
     }
+    return result.data;
   }
 
   async function confirmAdvance() {
@@ -601,8 +680,9 @@ export default function AgentVisualPage() {
     }
     if (isCheckpointWriting) return;
     setIsCheckpointWriting(true);
+    let checkpointResult: { events?: AgentRunEvent[] } | undefined;
     try {
-      await writeCheckpoint({
+      checkpointResult = await writeCheckpoint({
         action: "confirm",
         checkpointSummary: latestCheckpointSummary,
         checkpointKind: latestCheckpointKind,
@@ -635,6 +715,7 @@ export default function AgentVisualPage() {
     );
     setCheckpointMode("confirmed");
     appendChat("agent", `已确认 ${selected.name} 的评分结果，并将招募状态推进到测试题待发。`);
+    if (checkpointResult?.events?.length) appendBackendTrace(latestRunCheckpoint.run_id, checkpointResult.events);
     handleToast("评分结果已确认，状态已推进");
     await refreshCandidates();
     await refreshWorkflowTraces(selected);
@@ -658,8 +739,9 @@ export default function AgentVisualPage() {
       handleToast("请填写调整原因");
       return;
     }
+    let checkpointResult: { events?: AgentRunEvent[] } | undefined;
     try {
-      await writeCheckpoint({
+      checkpointResult = await writeCheckpoint({
         action: "modify",
         rating: reviewRating,
         aiSuggestion: reviewSuggestion,
@@ -691,6 +773,9 @@ export default function AgentVisualPage() {
       )
     );
     setCheckpointMode("badcaseRecorded");
+    if (checkpointResult?.events?.length && latestRunCheckpoint?.run_id) {
+      appendBackendTrace(latestRunCheckpoint.run_id, checkpointResult.events);
+    }
     handleToast("已记录人工修改并生成 Badcase");
   }
 
@@ -740,7 +825,7 @@ export default function AgentVisualPage() {
         <strong>Resource Agent Console</strong>
         <ModePill mode={runMode} isRunning={isRunningAgent} />
           <Nav activeTab={activeTab} onChange={setActiveTab} />
-        <ModeSwitch mode={runMode} onChange={setRunMode} disabled={isRunningAgent} />
+        <ModeSwitch mode={runMode} onChange={handleRunModeChange} disabled={isRunningAgent} />
         <div className="visual-agent-state">
           <span />
           Agent · {isRunningAgent ? "Running" : "Idle"}
@@ -831,92 +916,28 @@ export default function AgentVisualPage() {
                 <p>可以输入「看一下所有还没解析的简历」或「看下候选人姓名的简历」。对话流只展示真实指令和 Lark 当前数据。</p>
               </section>
             ) : (
-              chatMessages.map((message) => <ChatBubble key={message.id} role={message.role} text={message.text} />)
-            )}
-
-            {runEvents.length > 0 && (
-              <div className="visual-trace-stack">
-                {runEvents
-                  .filter((event) => event.event_type !== "checkpoint")
-                  .map((event) => (
-                    <details className="visual-trace" key={event.event_id}>
-                      <summary>
-                        <span className={`trace-state trace-${event.event_type === "step_failed" ? "waiting" : "done"}`}>
-                          {event.event_type === "step_failed" ? "ERR" : isRunningAgent ? "RUN" : "OK"}
-                        </span>
-                        <strong>{eventSummary(event)}</strong>
-                        <span>{event.event_type}</span>
-                        {event.payload.dry_run === true || stringifyPayload(event.payload).toLowerCase().includes("dry-run") ? (
-                          <em>dry-run / 未写回</em>
-                        ) : null}
-                      </summary>
-                      <p>{stringifyPayload(event.payload)}</p>
-                    </details>
-                  ))}
-              </div>
-            )}
-
-            {(latestRunCheckpoint || checkpointMode !== "pending") && (
-              <section className="visual-checkpoint">
-                <div className="checkpoint-head">
-                  <span>{checkpointMode === "editing" ? "CHECKPOINT · 修改结果" : "CHECKPOINT · 等待人工确认"}</span>
-                  <strong>{checkpointMode === "confirmed" ? "CONFIRMED" : checkpointMode === "badcaseRecorded" ? "BADCASE" : "PENDING"}</strong>
-                </div>
-                <div className={`checkpoint-run-state ${canConfirmAdvance ? "ready" : "blocked"}`}>
-                  <strong>{latestRunWritebackState}</strong>
-                  <span>{canConfirmAdvance ? "真实写回入口已开放" : confirmDisabledReason || "等待 production 非 dry-run 事件"}</span>
-                </div>
-                <div className="checkpoint-grid">
-                  <Info label="总分" value={String(latestCheckpointSummary?.total_score ?? "待生成")} mono accent />
-                  <Info label="评级" value={String(latestCheckpointSummary?.final_tier ?? "待生成")} mono accent />
-                  <Info label="AI 建议" value={String(latestCheckpointSummary?.ai_suggestion ?? "待生成")} accent />
-                  <Info label="置信度" value={String(latestCheckpointSummary?.confidence ?? "待生成")} mono />
-                  <Info label="置信度原因" value={displayCandidate.confidenceReason} />
-                  <Info label="下一步建议" value={displayCandidate.nextStep} accent />
-                </div>
-                <div className="checkpoint-evidence">
-                  {displayCandidate.comment}
-                </div>
-                {checkpointMode === "editing" ? (
-                  <div className="checkpoint-edit-form">
-                    <label>
-                      调整评级
-                      <select value={reviewRating} onChange={(event) => setReviewRating(event.target.value)}>
-                        {["S", "A", "B", "C"].map((rating) => (
-                          <option key={rating} value={rating}>{rating}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      调整建议
-                      <select value={reviewSuggestion} onChange={(event) => setReviewSuggestion(event.target.value)}>
-                        {["优先录用", "进入测试", "人工复核", "建议婉拒"].map((item) => (
-                          <option key={item} value={item}>{item}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="checkpoint-reason">
-                      调整原因
-                      <textarea
-                        value={reviewReason}
-                        onChange={(event) => setReviewReason(event.target.value)}
-                        placeholder="请填写为什么调整 Agent 结论，例如：简历未体现游戏项目，需人工复核。"
-                      />
-                    </label>
-                    <div className="checkpoint-actions">
-                      <button disabled={!canEditReview} onClick={submitReview} title={canEditReview ? "提交真实写回" : confirmDisabledReason} type="button">提交修改并记录 Badcase</button>
-                      <button onClick={() => setCheckpointMode("pending")} type="button">取消</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="checkpoint-actions">
-                    <button disabled={!canConfirmAdvance} onClick={confirmAdvance} title={canConfirmAdvance ? "确认真实写回" : confirmDisabledReason} type="button">
-                      {isCheckpointWriting ? "推进中" : "确认推进"}
-                    </button>
-                    <button disabled={!canEditReview} onClick={() => setCheckpointMode("editing")} title={canEditReview ? "进入真实写回修改" : confirmDisabledReason} type="button">修改结果</button>
-                  </div>
-                )}
-              </section>
+              chatMessages.map((message) => (
+                <ChatTimelineItem
+                  canConfirmAdvance={canConfirmAdvance}
+                  canEditReview={canEditReview}
+                  checkpointMode={checkpointMode}
+                  confirmDisabledReason={confirmDisabledReason}
+                  displayCandidate={displayCandidate}
+                  isCheckpointWriting={isCheckpointWriting}
+                  key={message.id}
+                  message={message}
+                  onConfirmAdvance={confirmAdvance}
+                  onEdit={() => setCheckpointMode("editing")}
+                  reviewRating={reviewRating}
+                  reviewReason={reviewReason}
+                  reviewSuggestion={reviewSuggestion}
+                  setCheckpointMode={setCheckpointMode}
+                  setReviewRating={setReviewRating}
+                  setReviewReason={setReviewReason}
+                  setReviewSuggestion={setReviewSuggestion}
+                  submitReview={submitReview}
+                />
+              ))
             )}
           </div>
 
@@ -1081,6 +1102,199 @@ function ModeSwitch({
           {runModeCopy[item].label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function checkpointSummaryFromEvent(event?: AgentRunEvent) {
+  return (event?.payload.summary ?? {}) as Record<string, unknown>;
+}
+
+function checkpointKindFromSummary(summary: Record<string, unknown>) {
+  if ("total_score" in summary || "final_tier" in summary) return "resume";
+  if ("subject" in summary || "attachment" in summary) return "test-email";
+  if ("selected_template" in summary || "filled_variables" in summary) return "contract";
+  return "generic";
+}
+
+function ChatTimelineItem({
+  message,
+  displayCandidate,
+  checkpointMode,
+  canConfirmAdvance,
+  canEditReview,
+  confirmDisabledReason,
+  isCheckpointWriting,
+  reviewRating,
+  reviewSuggestion,
+  reviewReason,
+  setCheckpointMode,
+  setReviewRating,
+  setReviewSuggestion,
+  setReviewReason,
+  onConfirmAdvance,
+  onEdit,
+  submitReview
+}: {
+  message: ChatMessage;
+  displayCandidate: Candidate;
+  checkpointMode: CheckpointMode;
+  canConfirmAdvance: boolean;
+  canEditReview: boolean;
+  confirmDisabledReason: string;
+  isCheckpointWriting: boolean;
+  reviewRating: string;
+  reviewSuggestion: string;
+  reviewReason: string;
+  setCheckpointMode: (mode: CheckpointMode) => void;
+  setReviewRating: (value: string) => void;
+  setReviewSuggestion: (value: string) => void;
+  setReviewReason: (value: string) => void;
+  onConfirmAdvance: () => void;
+  onEdit: () => void;
+  submitReview: () => void;
+}) {
+  if (message.kind === "trace") {
+    return <TraceMessage events={message.events ?? []} />;
+  }
+
+  if (message.kind === "waiting_input") {
+    return (
+      <div className="visual-bubble-row agent">
+        <div className="bubble-avatar">AI</div>
+        <div className="visual-waiting-card">
+          <span>等待补充信息</span>
+          <strong>{message.text}</strong>
+          <p>{String(message.event?.payload.next ?? "请补充后继续执行。")}</p>
+          {Array.isArray(message.event?.payload.accepted) && (
+            <small>支持格式：{(message.event?.payload.accepted as string[]).join(" / ")}</small>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (message.kind === "error") {
+    return (
+      <div className="visual-bubble-row agent">
+        <div className="bubble-avatar">AI</div>
+        <div className="visual-error-card">
+          <span>需要人工处理</span>
+          <strong>{message.text}</strong>
+          <pre>{stringifyPayload(message.event?.payload ?? {})}</pre>
+        </div>
+      </div>
+    );
+  }
+
+  if (message.kind === "checkpoint") {
+    const summary = checkpointSummaryFromEvent(message.event);
+    const kind = checkpointKindFromSummary(summary);
+    return (
+      <div className="visual-bubble-row agent">
+        <div className="bubble-avatar">AI</div>
+        <section className="visual-checkpoint visual-checkpoint-inline">
+          <div className="checkpoint-head">
+            <span>{checkpointMode === "editing" ? "CHECKPOINT · 修改结果" : "CHECKPOINT · 等待人工确认"}</span>
+            <strong>{checkpointMode === "confirmed" ? "CONFIRMED" : checkpointMode === "badcaseRecorded" ? "BADCASE" : "PENDING"}</strong>
+          </div>
+          <div className={`checkpoint-run-state ${canConfirmAdvance ? "ready" : "blocked"}`}>
+            <strong>{canConfirmAdvance ? "production，可进入真实写回确认" : "当前不可确认"}</strong>
+            <span>{canConfirmAdvance ? "真实写回入口已开放" : confirmDisabledReason || "等待 production 非 dry-run 事件"}</span>
+          </div>
+          <div className="checkpoint-grid">
+            <Info label="总分" value={String(summary.total_score ?? "待生成")} mono accent />
+            <Info label="评级" value={String(summary.final_tier ?? "待生成")} mono accent />
+            <Info label="AI 建议" value={String(summary.ai_suggestion ?? "待生成")} accent />
+            <Info label="置信度" value={String(summary.confidence ?? "待生成")} mono />
+            <Info label="置信度原因" value={String(summary.word_count_source ?? displayCandidate.confidenceReason)} />
+            <Info label="下一步建议" value={displayCandidate.nextStep} accent />
+          </div>
+          <div className="checkpoint-evidence">
+            {String(summary.comment ?? displayCandidate.comment)}
+          </div>
+          {kind !== "resume" && (
+            <details className="checkpoint-raw-detail">
+              <summary>查看完整 checkpoint</summary>
+              <pre>{stringifyPayload(message.event?.payload ?? {})}</pre>
+            </details>
+          )}
+          {checkpointMode === "editing" ? (
+            <div className="checkpoint-edit-form">
+              <label>
+                调整评级
+                <select value={reviewRating} onChange={(event) => setReviewRating(event.target.value)}>
+                  {["S", "A", "B", "C"].map((rating) => (
+                    <option key={rating} value={rating}>{rating}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                调整建议
+                <select value={reviewSuggestion} onChange={(event) => setReviewSuggestion(event.target.value)}>
+                  {["优先录用", "进入测试", "人工复核", "建议婉拒"].map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="checkpoint-reason">
+                调整原因
+                <textarea
+                  value={reviewReason}
+                  onChange={(event) => setReviewReason(event.target.value)}
+                  placeholder="请填写为什么调整 Agent 结论，例如：简历未体现游戏项目，需人工复核。"
+                />
+              </label>
+              <div className="checkpoint-actions">
+                <button disabled={!canEditReview} onClick={submitReview} title={canEditReview ? "提交真实写回" : confirmDisabledReason} type="button">提交修改并记录 Badcase</button>
+                <button onClick={() => setCheckpointMode("pending")} type="button">取消</button>
+              </div>
+            </div>
+          ) : (
+            <div className="checkpoint-actions">
+              <button disabled={!canConfirmAdvance} onClick={onConfirmAdvance} title={canConfirmAdvance ? "确认真实写回" : confirmDisabledReason} type="button">
+                {checkpointMode === "confirmed" ? "已确认" : isCheckpointWriting ? "推进中" : "确认推进"}
+              </button>
+              <button disabled={!canEditReview} onClick={onEdit} title={canEditReview ? "进入真实写回修改" : confirmDisabledReason} type="button">修改结果</button>
+            </div>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  return <ChatBubble role={message.role} text={message.text} />;
+}
+
+function TraceMessage({ events }: { events: AgentRunEvent[] }) {
+  if (events.length === 0) return null;
+  const latest = events[events.length - 1];
+  return (
+    <div className="visual-bubble-row agent">
+      <div className="bubble-avatar">AI</div>
+      <details className="visual-trace-message" open={latest.event_type === "step_failed"}>
+        <summary>
+          <span className={`trace-state trace-${latest.event_type === "step_failed" ? "waiting" : "done"}`}>
+            {latest.event_type === "step_failed" ? "ERR" : "RUN"}
+          </span>
+          <strong>执行过程</strong>
+          <em>{events.length} 条事件</em>
+        </summary>
+        <div className="visual-trace-stack visual-trace-stack-inline">
+          {events.map((event) => (
+            <details className="visual-trace" key={event.event_id}>
+              <summary>
+                <span className={`trace-state trace-${event.event_type === "step_failed" ? "waiting" : "done"}`}>
+                  {event.event_type === "step_failed" ? "ERR" : "OK"}
+                </span>
+                <strong>{eventSummary(event)}</strong>
+                <span>{event.event_type}</span>
+              </summary>
+              <p>{stringifyPayload(event.payload)}</p>
+            </details>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }

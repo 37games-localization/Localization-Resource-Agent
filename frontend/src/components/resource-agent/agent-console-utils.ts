@@ -10,7 +10,9 @@ export const eventLabel: Record<AgentRunEvent["event_type"], string> = {
   tool_call_started: "脚本调用",
   tool_call_output: "脚本输出",
   warning: "风险提示",
+  waiting_input: "等待输入",
   checkpoint: "人工确认",
+  checkpoint_confirmed: "确认完成",
   vm_decision: "人工决策",
   lark_writeback: "Lark 写回",
   workflow_log_written: "日志写入",
@@ -34,6 +36,7 @@ export function sanitizeDemoText(text: string) {
 
 export function statusForEvent(event: AgentRunEvent) {
   if (event.event_type === "step_failed") return "failed";
+  if (event.event_type === "waiting_input") return "waiting";
   if (event.event_type === "checkpoint") return "waiting";
   if (event.event_type === "warning") return "warning";
   if (event.event_type === "run_done" || event.event_type === "step_done") return "done";
@@ -46,6 +49,7 @@ export function eventSummary(event: AgentRunEvent) {
     return text || "脚本输出";
   }
   if (event.event_type === "step_failed") return "执行失败";
+  if (event.event_type === "waiting_input") return sanitizeDemoText(String(event.payload.prompt ?? "等待补充信息"));
   if (event.event_type === "checkpoint") return sanitizeDemoText(String(event.payload.title ?? "等待确认"));
   if (event.event_type === "step_input") return sanitizeDemoText(String(event.payload.command_preview ?? "步骤输入"));
   if (event.event_type === "warning") return sanitizeDemoText(String(event.payload.message ?? "风险提示"));

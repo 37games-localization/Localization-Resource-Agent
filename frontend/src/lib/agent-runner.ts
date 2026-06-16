@@ -39,7 +39,9 @@ export type AgentRunEvent = {
     | "tool_call_started"
     | "tool_call_output"
     | "warning"
+    | "waiting_input"
     | "checkpoint"
+    | "checkpoint_confirmed"
     | "vm_decision"
     | "lark_writeback"
     | "workflow_log_written"
@@ -69,6 +71,12 @@ export type PlannedCommand = {
   args: string[];
   resolvedAttachment?: string;
   validationErrors?: string[];
+  waitingInput?: {
+    input_type: "attachment" | "candidate" | "text";
+    prompt: string;
+    accepted?: string[];
+    next: string;
+  };
   checkpointAfterSuccess?: {
     title: string;
     detail: string;
@@ -267,9 +275,6 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
   }
 
   if (action === "test-email") {
-    if (!firstAttachment) {
-      validationErrors.push("测试题邮件缺少附件路径：请提供测试题 xlsx/pdf/docx 文件路径。");
-    }
     return {
       action,
       requestedMode,
@@ -281,6 +286,14 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
       args: [...candidate.args, ...(firstAttachment ? ["--file", firstAttachment] : []), ...modeArgs(effectiveMode)],
       resolvedAttachment: firstAttachment,
       validationErrors,
+      waitingInput: !firstAttachment
+        ? {
+            input_type: "attachment",
+            prompt: "请提供测试题附件或本地路径。",
+            accepted: [".xlsx", ".pdf", ".docx"],
+            next: "上传附件，或在对话框输入本地文件路径后重新发送“发测试题”。"
+          }
+        : undefined,
       warnings: [
         ...(candidate.warnings ?? []),
         ...(requestedMode === "production"
@@ -388,9 +401,6 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
   }
 
   if (action === "signed-contract-check") {
-    if (!firstAttachment) {
-      validationErrors.push("签字合同核查缺少签回 PDF 路径：请提供已签署合同文件路径。");
-    }
     return {
       action,
       requestedMode,
@@ -401,6 +411,14 @@ export function planAgentRun(request: AgentRunRequest): PlannedCommand {
       script: `${SKILL_ROOT}/scripts/check_signed_contract.py`,
       args: [...candidate.args, ...(firstAttachment ? ["--file", firstAttachment] : []), ...modeArgs(effectiveMode)],
       validationErrors,
+      waitingInput: !firstAttachment
+        ? {
+            input_type: "attachment",
+            prompt: "请提供签回合同 PDF 或图片文件路径。",
+            accepted: [".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".heic", ".webp"],
+            next: "上传签回合同，或在对话框输入本地文件路径后重新发送“检查签字合同”。"
+          }
+        : undefined,
       warnings: [
         ...(candidate.warnings ?? []),
         ...(requestedMode === "production"

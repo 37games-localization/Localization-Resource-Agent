@@ -18,6 +18,17 @@ type CheckpointRequest = {
   mode?: "dry_run" | "production" | "test_mode";
 };
 
+type CheckpointEvent = {
+  event_id: string;
+  run_id: string;
+  event_type: "checkpoint_confirmed" | "lark_writeback" | "workflow_log_written";
+  timestamp: string;
+  candidate_record_id: string;
+  candidate_name?: string;
+  step_name: string;
+  payload: Record<string, unknown>;
+};
+
 function upsertRecord(
   table: "candidate" | "workflowLog",
   fields: Record<string, unknown>,
@@ -133,6 +144,25 @@ function checkpointCandidateName(body: CheckpointRequest, summary: Record<string
   return body.candidateName || textValue(summary.candidate_name);
 }
 
+function checkpointEvent(
+  runId: string,
+  eventType: CheckpointEvent["event_type"],
+  body: CheckpointRequest,
+  stepName: string,
+  payload: Record<string, unknown>
+): CheckpointEvent {
+  return {
+    event_id: `evt_${eventType}_${Date.now()}`,
+    run_id: runId,
+    event_type: eventType,
+    timestamp: new Date().toISOString(),
+    candidate_record_id: body.recordId || "",
+    candidate_name: checkpointCandidateName(body, body.checkpointSummary ?? {}),
+    step_name: stepName,
+    payload
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as CheckpointRequest;
@@ -196,11 +226,29 @@ export async function POST(request: Request) {
         outputSummary: `评级=${body.rating || "A"}；AI建议=${body.aiSuggestion || "人工复核"}`,
         decision: body.reason
       });
+      const runId = checkpointRunId(body, summary);
       return NextResponse.json({
         ok: true,
         data: {
           status: "badcase_recorded",
-          updatedFields: ["初始评级", "AI建议", "Badcase 标记", "期望结果"]
+          updatedFields: ["初始评级", "AI建议", "Badcase 标记", "期望结果"],
+          events: [
+            checkpointEvent(runId, "checkpoint_confirmed", body, "resume-score-modify", {
+              status: "modified",
+              decision: body.reason,
+              updated_fields: ["初始评级", "AI建议", "Badcase 标记", "期望结果"]
+            }),
+            checkpointEvent(runId, "lark_writeback", body, "resume-score-modify", {
+              target: "candidate",
+              status: "success",
+              record_id: body.recordId,
+              updated_fields: ["初始评级", "AI建议", "Badcase 标记", "期望结果"]
+            }),
+            checkpointEvent(runId, "workflow_log_written", body, "resume-score-modify", {
+              target: "workflow_log",
+              status: "success"
+            })
+          ]
         }
       });
     }
@@ -230,9 +278,10 @@ export async function POST(request: Request) {
     const projectCount = numberValue(summary.project_count);
     if (projectCount !== undefined) confirmedFields["解析项目数"] = projectCount;
 
+    const runId = checkpointRunId(body, summary);
     updateCandidate(body.recordId, confirmedFields);
     writeWorkflowLog({
-      runId: checkpointRunId(body, summary),
+      runId,
       candidateRecordId: body.recordId,
       candidateName: checkpointCandidateName(body, summary),
       stepName: "resume-score-confirm",
@@ -246,7 +295,25 @@ export async function POST(request: Request) {
       ok: true,
       data: {
         status: "confirmed",
-        updatedFields: Object.keys(confirmedFields)
+        updatedFields: Object.keys(confirmedFields),
+        events: [
+          checkpointEvent(runId, "checkpoint_confirmed", body, "resume-score-confirm", {
+            status: "confirmed",
+            decision: "VM 确认评分结果",
+            updated_fields: Object.keys(confirmedFields)
+          }),
+          checkpointEvent(runId, "lark_writeback", body, "resume-score-confirm", {
+            target: "candidate",
+            status: "success",
+            record_id: body.recordId,
+            next_status: confirmedFields["招募状态"],
+            updated_fields: Object.keys(confirmedFields)
+          }),
+          checkpointEvent(runId, "workflow_log_written", body, "resume-score-confirm", {
+            target: "workflow_log",
+            status: "success"
+          })
+        ]
       }
     });
   } catch (error) {

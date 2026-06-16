@@ -409,6 +409,24 @@ export async function POST(request: NextRequest) {
         return;
       }
 
+      if (plan.waitingInput) {
+        send(
+          event(
+            "waiting_input",
+            {
+              ...plan.waitingInput,
+              action: plan.action,
+              candidate_name: plan.candidateName,
+              candidate_record_id: plan.candidateRecordId
+            },
+            plan.action
+          )
+        );
+        send(event("run_done", { status: "waiting_input" }));
+        controller.close();
+        return;
+      }
+
       if (!plan.script || !existsSync(plan.script)) {
         send(
           event("step_failed", {

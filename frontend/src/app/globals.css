@@ -2996,6 +2996,119 @@ h1 {
   padding: 10px 12px;
 }
 
+.visual-bubble-row.agent > .visual-checkpoint,
+.visual-bubble-row.agent > .visual-trace-message,
+.visual-bubble-row.agent > .visual-waiting-card,
+.visual-bubble-row.agent > .visual-error-card {
+  max-width: min(92%, 860px);
+  width: 100%;
+}
+
+.visual-checkpoint-inline {
+  margin: 0;
+}
+
+.visual-trace-message {
+  background: rgba(56, 139, 253, 0.06);
+  border: 1px solid rgba(56, 139, 253, 0.16);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.visual-trace-message > summary {
+  align-items: center;
+  color: var(--visual-muted);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  list-style: none;
+  padding: 10px 12px;
+}
+
+.visual-trace-message > summary::-webkit-details-marker {
+  display: none;
+}
+
+.visual-trace-message > summary strong {
+  color: var(--visual-text);
+  font-size: 12px;
+}
+
+.visual-trace-message > summary em {
+  color: var(--visual-muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.visual-trace-stack-inline {
+  border-top: 1px solid rgba(240, 246, 252, 0.06);
+  padding: 10px;
+}
+
+.visual-waiting-card,
+.visual-error-card {
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.visual-waiting-card {
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.34);
+}
+
+.visual-error-card {
+  background: rgba(218, 54, 51, 0.1);
+  border: 1px solid rgba(218, 54, 51, 0.3);
+}
+
+.visual-waiting-card span,
+.visual-error-card span {
+  color: var(--visual-amber);
+  display: block;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.visual-error-card span {
+  color: var(--visual-orange);
+}
+
+.visual-waiting-card strong,
+.visual-error-card strong {
+  color: var(--visual-text);
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.visual-waiting-card p,
+.visual-error-card p,
+.visual-waiting-card small {
+  color: var(--visual-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.visual-error-card pre {
+  background: #0d1117;
+  border: 1px solid rgba(240, 246, 252, 0.08);
+  border-radius: 6px;
+  color: #c9d1d9;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.55;
+  margin: 8px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 .visual-bubble-row.vm .visual-bubble { background: rgba(63, 185, 80, 0.1); border-color: rgba(63, 185, 80, 0.2); }
 
 .visual-bubble span {
