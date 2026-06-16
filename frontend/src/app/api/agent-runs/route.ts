@@ -215,6 +215,14 @@ function inferResumeConfidence({
   return "低 ⚠️ 未识别到稳定字数依据";
 }
 
+function normalizeValidResume(value?: string) {
+  if (!value) return "未识别";
+  const normalized = value.trim();
+  if (/✅|是|true|有效/i.test(normalized)) return "是";
+  if (/❌|否|false|无效/i.test(normalized)) return "否";
+  return normalized;
+}
+
 function buildCheckpointPayload(
   action: string,
   fallback: { title: string; detail: string },
@@ -309,7 +317,9 @@ function buildCheckpointPayload(
   const scorePart = "([0-9.]+\\/[0-9.]+)";
   const labeledScore = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?总分[：:]\s*([0-9.]+)(?:\s*\/\s*100)?/);
   const labeledTier = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?档位[：:]\s*([A-Z])/);
-  const labeledValid = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?有效简历[：:]\s*([^\n\r]+)/);
+  const labeledValid =
+    outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?有效简历[：:]\s*([^\n\r]+)/) ??
+    outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?有效[：:=]\s*([^\s\n\r]+)/);
   const rationaleLine = outputText.match(/(?:^|\n)\s*(?:[-•]\s*)?(?:依据|评分依据)[：:]\s*([^\n\r]+)/);
   const scoreLine = outputText.match(
     new RegExp(
@@ -338,7 +348,8 @@ function buildCheckpointPayload(
   const totalScore = evaluationSummary?.[2] ?? llmStructuredLine?.[4] ?? v2ScoreLine?.[1] ?? scoreLine?.[6] ?? dryRunLine?.[2] ?? labeledScore?.[1] ?? "未识别";
   const finalTier = evaluationSummary?.[3] ?? llmStructuredLine?.[5] ?? v2ScoreLine?.[3] ?? scoreLine?.[5] ?? dryRunLine?.[3] ?? labeledTier?.[1] ?? "未识别";
   const initialTier = v2ScoreLine?.[2] ?? scoreLine?.[4] ?? finalTier;
-  const validResume = evaluationSummary?.[4] ?? llmStructuredLine?.[6] ?? validLine?.[1]?.trim() ?? labeledValid?.[1]?.trim() ?? "未识别";
+  const validResumeRaw = evaluationSummary?.[4] ?? llmStructuredLine?.[6] ?? validLine?.[1]?.trim() ?? labeledValid?.[1]?.trim();
+  const validResume = normalizeValidResume(validResumeRaw);
   const evidence = validLine?.[2]?.trim() ?? rationaleLine?.[1]?.trim() ?? "未识别";
   const parsedChars = evaluationSummary?.[1] ?? pdfLine?.[1]?.replace(/,/g, "") ?? "未识别";
   const recordId = dryRunLine?.[1] ?? candidateRecordId ?? "未识别";
