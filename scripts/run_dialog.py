@@ -89,6 +89,39 @@ def checkpoint_type_for(command: str, node: str | None = None) -> str:
     return mapping.get(command, "generic")
 
 
+def writeback_fields_for(command: str) -> list[str]:
+    mapping = {
+        "score": ["score", "rating", "ai_suggestion", "confidence", "resume_valid", "recruitment_status"],
+        "test-email": ["recruitment_status", "workflow_log"],
+        "contract-info-email": ["recruitment_status", "workflow_log"],
+        "contract": ["contract_file", "workflow_log"],
+        "resume": ["workflow_log"],
+    }
+    return mapping.get(command, ["workflow_log"])
+
+
+def error_code_for(message: str) -> str:
+    if "附件不存在" in message:
+        return "missing_file"
+    if "请提供 --name 或 --record-id" in message:
+        return "missing_candidate"
+    if "请提供 --file" in message:
+        return "missing_attachment"
+    if "请提供 --token" in message:
+        return "missing_checkpoint_token"
+    if "请提供 --decision" in message:
+        return "missing_decision"
+    if "恢复执行失败" in message:
+        return "resume_failed"
+    if "读取待决策列表失败" in message:
+        return "waiting_list_failed"
+    if "脚本执行失败" in message:
+        return "script_failed"
+    if "脚本执行超时" in message:
+        return "script_timeout"
+    return "cli_error"
+
+
 def emit_jsonl_event(event_type: str, *, payload: dict | None = None, **fields):
     """Emit exactly one JSON object per stdout line."""
     print(json.dumps(build_jsonl_event(event_type, payload=payload, **fields), ensure_ascii=False, separators=(",", ":")))
@@ -101,15 +134,15 @@ def emit(data: dict):
     sys.stdout.flush()
 
 
-def emit_error(message: str, raw_output: str = ""):
+def emit_error(message: str, raw_output: str = "", *, code: str | None = None, recoverable: bool = True):
     if JSONL_MODE:
         emit_jsonl_event(
             "error",
             status="failed",
             error={
-                "code": "cli_error",
+                "code": code or error_code_for(message),
                 "message": message,
-                "recoverable": True,
+                "recoverable": recoverable,
                 "raw_output": raw_output[:2000],
             },
         )
@@ -282,8 +315,6 @@ def cmd_test_email(args):
     if not args.name and not args.record_id:
         emit_error("请提供 --name 或 --record-id")
         return
-    if not ensure_schema_ready("test-email"):
-        return
     if not args.file:
         emit_error("发测试题需要 --file 参数（测试题 PDF 路径）")
         return
@@ -291,6 +322,8 @@ def cmd_test_email(args):
     file_path = Path(args.file).expanduser()
     if not file_path.exists():
         emit_error(f"附件不存在：{file_path}")
+        return
+    if not ensure_schema_ready("test-email"):
         return
 
     script = SCRIPTS_DIR / "send_test_email_v2.py"
@@ -405,6 +438,16 @@ def cmd_resume(args):
         "--decision", args.decision,
     ]
 
+    if JSONL_MODE:
+        emit_jsonl_event(
+            "vm_decision",
+            action=args.command,
+            step=args.command,
+            token=args.token,
+            decision=args.decision,
+            status="submitted",
+        )
+
     result = subprocess.run(
         cmd,
         cwd=str(SKILL_DIR),
@@ -416,7 +459,7 @@ def cmd_resume(args):
     raw = (result.stdout + result.stderr).strip()
 
     if result.returncode != 0:
-        emit_error(f"恢复执行失败（exit={result.returncode}）：{raw}", raw)
+        emit_error(f"恢复执行失败（exit={result.returncode}）：{raw}", raw, code="resume_failed")
         return
 
     # 等待后台脚本完成（轮询 checkpoint 文件）
@@ -484,6 +527,10 @@ def cmd_waiting(args):
             action=args.command,
             step=args.command,
             status="waiting" if rows else "empty",
+            field="checkpoint",
+            token=None,
+            prompt="请选择等待人工决策的 checkpoint 并调用 resume",
+            accept=["checkpoint_token", "decision"],
             waiting=rows,
             message=f"当前有 {len(rows)} 条待决策记录" if rows else "当前没有等待人工决策的候选人",
         )
@@ -601,6 +648,8 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
                 candidate={"name": candidate_display},
                 summary=summary,
                 allowed_actions=options,
+                writeback_fields=writeback_fields_for(args.command),
+                mode_effective="cli",
                 raw_output=raw_output[:2000],
             )
             emit_jsonl_event("run_done", status="waiting_confirmation", token=checkpoint_token)
