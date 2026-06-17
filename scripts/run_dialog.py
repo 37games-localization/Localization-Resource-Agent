@@ -441,7 +441,9 @@ def cmd_test_email(args):
         cmd += ["--record-id", record_id]
     elif args.name:
         cmd += ["--name", args.name]
-    cmd += ["--file", str(file_path)]
+    # Dialog invocations are non-interactive. Generate a local draft by default
+    # and leave the actual send/status writeback to the explicit mark-sent flow.
+    cmd += ["--file", str(file_path), "--draft", "--yes"]
 
     _run_with_checkpoint(cmd, candidate, args)
 
@@ -488,6 +490,9 @@ def cmd_contract_info_email(args):
         cmd += ["--record-id", record_id]
     elif args.name:
         cmd += ["--name", args.name]
+    # Dialog invocations are non-interactive. Generate a local draft by default
+    # and leave the actual send/status writeback to the explicit mark-sent flow.
+    cmd += ["--draft", "--yes"]
 
     _run_with_checkpoint(cmd, candidate, args)
 
