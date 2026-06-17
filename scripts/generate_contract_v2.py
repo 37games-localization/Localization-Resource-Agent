@@ -33,8 +33,108 @@ from generate_contract import (
     replace_para, fill_template_vars, insert_id_scan, download_id_scan_images,
     check_name_match, send_email, list_records,
 )
+from field_resolver import field_id_or
+from lark_cli_utils import normalize_record_list_data
 
 _CFG = load_config()
+_LARK = get_lark(_CFG)
+CANDIDATE_BASE = _LARK.get("base_token", "")
+CANDIDATE_TABLE = _LARK.get("resume_table_id", "")
+CANDIDATE_NAME_FIELD = field_id_or("candidate", "candidate.name", "姓名")
+CANDIDATE_EMAIL_FIELD = field_id_or("candidate", "candidate.email", "邮箱")
+
+
+def normalize_match_key(value: str) -> str:
+    return re.sub(r"[\s,，.。:：;；/\\-]+", "", (value or "").lower())
+
+
+def field_text(fields: dict, *keys: str) -> str:
+    for key in keys:
+        if key and key in fields:
+            text = extract_text(fields.get(key))
+            if text:
+                return text
+    return ""
+
+
+def fetch_candidate_records() -> list[dict]:
+    if not CANDIDATE_BASE or not CANDIDATE_TABLE:
+        return []
+    records, page_token = [], None
+    while True:
+        args = [
+            "base", "+record-list",
+            "--base-token", CANDIDATE_BASE,
+            "--table-id", CANDIDATE_TABLE,
+            "--format", "json",
+            "--limit", "100",
+        ]
+        if page_token:
+            args += ["--page-token", page_token]
+        resp = lark(*args)
+        data = resp.get("data", resp)
+        records.extend(normalize_record_list_data(data))
+        if not data.get("has_more") or not data.get("page_token"):
+            break
+        page_token = data.get("page_token")
+    return records
+
+
+def find_candidate_record(*, record_id: str = "", name: str = "") -> dict | None:
+    records = fetch_candidate_records()
+    if record_id:
+        return next((r for r in records if r.get("record_id") == record_id), None)
+    if name:
+        key = normalize_match_key(name)
+        matches = []
+        for rec in records:
+            fields = rec.get("fields", {})
+            candidate_name = field_text(fields, CANDIDATE_NAME_FIELD, "姓名", "姓名（全名）")
+            if key and key in normalize_match_key(candidate_name):
+                matches.append(rec)
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def match_contract_info_record(collect_records: list[dict], *, candidate: dict | None = None, name: str = "") -> tuple[dict | None, str]:
+    candidate_fields = (candidate or {}).get("fields", {})
+    candidate_name = field_text(candidate_fields, CANDIDATE_NAME_FIELD, "姓名", "姓名（全名）") or name
+    candidate_email = field_text(candidate_fields, CANDIDATE_EMAIL_FIELD, "邮箱", "常用邮箱", "常用工作邮箱")
+    name_key = normalize_match_key(candidate_name)
+    email_key = normalize_match_key(candidate_email)
+
+    scored = []
+    for rec in collect_records:
+        fields = rec.get("fields", {})
+        contract_name = field_text(fields, FLD_NAME, "姓名", "姓名（全名）")
+        contract_email = field_text(fields, FLD_EMAIL, "邮箱", "常用邮箱", "常用工作邮箱")
+        contract_name_key = normalize_match_key(contract_name)
+        contract_email_key = normalize_match_key(contract_email)
+
+        score = 0
+        reasons = []
+        if email_key and contract_email_key and email_key == contract_email_key:
+            score += 100
+            reasons.append("邮箱一致")
+        if name_key and contract_name_key and name_key == contract_name_key:
+            score += 80
+            reasons.append("姓名一致")
+        elif name_key and contract_name_key and (name_key in contract_name_key or contract_name_key in name_key):
+            score += 50
+            reasons.append("姓名部分匹配")
+        if score:
+            scored.append((score, rec, "、".join(reasons)))
+
+    if not scored:
+        return None, f"未在合同信息收集表找到候选人合同信息：{candidate_name or candidate_email or '未知候选人'}"
+    scored.sort(key=lambda item: item[0], reverse=True)
+    top_score = scored[0][0]
+    top_matches = [item for item in scored if item[0] == top_score]
+    if len(top_matches) > 1:
+        names = ", ".join(field_text(item[1].get("fields", {}), FLD_NAME, "姓名", "姓名（全名）") for item in top_matches)
+        return None, f"找到多条合同信息疑似匹配，请补充唯一邮箱或姓名：{names}"
+    return scored[0][1], scored[0][2]
 
 
 def main():
@@ -66,21 +166,29 @@ def main():
     print(f"  共 {len(collect_records)} 条")
 
     target = None
+    candidate_record_id = ""
     if args.record_id:
-        for rec in collect_records:
-            if rec["record_id"] == args.record_id:
-                target = rec; break
+        candidate = find_candidate_record(record_id=args.record_id)
+        if not candidate:
+            print(f"❌ 未在候选人简历表找到 record_id={args.record_id}，合同生成需要先定位候选人再匹配合同信息表")
+            sys.exit(1)
+        candidate_record_id = candidate.get("record_id", "")
+        target, match_reason = match_contract_info_record(collect_records, candidate=candidate)
         if not target:
-            print(f"❌ 未找到 record_id={args.record_id}"); sys.exit(1)
+            print(f"❌ {match_reason}")
+            sys.exit(1)
+        print(f"  已通过候选人记录桥接合同信息：{match_reason}")
     elif args.name:
-        matches = [r for r in collect_records
-                   if args.name.lower() in extract_text(r["fields"].get(FLD_NAME, "")).lower()]
-        if not matches:
-            print(f"❌ 未找到姓名包含「{args.name}」的记录"); sys.exit(1)
-        if len(matches) > 1:
-            print(f"⚠️  找到 {len(matches)} 条，请用 --record-id 精确指定：")
-            list_records(matches); sys.exit(1)
-        target = matches[0]
+        candidate = find_candidate_record(name=args.name)
+        if candidate:
+            candidate_record_id = candidate.get("record_id", "")
+            target, match_reason = match_contract_info_record(collect_records, candidate=candidate, name=args.name)
+        else:
+            target, match_reason = match_contract_info_record(collect_records, name=args.name)
+        if not target:
+            print(f"❌ {match_reason}")
+            sys.exit(1)
+        print(f"  已匹配合同信息：{match_reason}")
 
     fields     = target["fields"]
     name       = extract_text(fields.get(FLD_NAME, "")) or "未知"
@@ -90,7 +198,7 @@ def main():
     # ── 初始化 WorkflowEngine ─────────────────────────────────────────────────
     wf = WorkflowEngine(
         candidate_name=name,
-        candidate_record_id=target["record_id"],
+        candidate_record_id=candidate_record_id or target["record_id"],
         write_lark=not args.no_lark_log,
     )
     wf.run_id = f"contract-{target['record_id'][:8]}-{int(time.time())}"
