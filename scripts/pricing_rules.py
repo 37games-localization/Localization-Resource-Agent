@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from config_loader import get_lark, is_test_mode, load_config
+from config_loader import get_lark, get_table_ref, is_test_mode, load_config
 from lark_cli_utils import normalize_record_list_response, run_lark_cli_json
 
 LOCAL_RULES_PATH = Path(__file__).parent.parent / "config" / "resume_screening_rules_v2.json"
@@ -113,7 +113,7 @@ def load_packaged_price_rules() -> dict:
 
 def load_lark_price_rules(base_token: str, table_id: str) -> dict:
     if not base_token or not table_id:
-        raise PricingRulesError("缺少 Lark 评分规则配置表：请填写 lark.base_token 和 lark.rules_table_id")
+        raise PricingRulesError("缺少 Lark 评分规则配置表：请填写 pricing_rules.base_token 和 pricing_rules.table_id")
 
     resp = run_lark_cli_json(
         "base", "+record-list",
@@ -153,14 +153,17 @@ def load_price_rules(
 ) -> tuple[dict, dict]:
     cfg = load_config()
     lark = get_lark(cfg)
+    base_token, table_id = get_table_ref(cfg, "pricing_rules")
     require_lark = (not is_test_mode(cfg)) if require_lark_rules is None else require_lark_rules
 
     try:
-        rules = load_lark_price_rules(lark.get("base_token", ""), lark.get("rules_table_id", ""))
+        rules = load_lark_price_rules(base_token, table_id)
         return rules, {
             "source": "lark",
-            "table_id": lark.get("rules_table_id", ""),
+            "base_token": base_token,
+            "table_id": table_id,
             "count": len(rules),
+            "legacy_rules_table_id": lark.get("rules_table_id", ""),
         }
     except PricingRulesError as exc:
         if require_lark and not allow_local_rules:
