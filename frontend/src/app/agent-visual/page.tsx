@@ -103,7 +103,6 @@ type RunMode = NonNullable<AgentRunRequest["mode"]>;
 const BACKEND_PENDING_TEXT = "待后端返回";
 const CHECKPOINT_CONFIRM_ACTION = "写入";
 const CHECKPOINT_MODIFY_ACTION = "modify";
-const TEST_EMAIL_CHECKPOINT_CONTRACT_READY = false;
 const TEST_EMAIL_ATTACHMENT_EXTENSIONS = new Set(["xlsx", "pdf", "docx"]);
 
 function statusFromLark(status: string, badcaseFlag: string): CandidateStatus {
@@ -786,13 +785,6 @@ export default function AgentVisualPage() {
       const message = "发测试题需要先上传 .xlsx/.pdf/.docx 附件。请点击“上传附件”后再发测试题。";
       appendChat("agent", message);
       handleToast(message);
-      return;
-    }
-
-    if (!TEST_EMAIL_CHECKPOINT_CONTRACT_READY) {
-      const message = `已识别最近上传附件：${attachment.filename}，但当前后端 test-email 路径会跳过邮件预览 checkpoint。按验收规则已停止调用后端，请先修复 test-email checkpoint contract gap。`;
-      appendChat("agent", message);
-      handleToast("已停止调用：test-email checkpoint contract gap");
       return;
     }
 
