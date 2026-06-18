@@ -80,38 +80,109 @@ export function getSkillConfigPath() {
   );
 }
 
+function stripInlineComment(value: string) {
+  let quote: string | null = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if ((char === "\"" || char === "'") && value[index - 1] !== "\\") {
+      quote = quote === char ? null : quote ?? char;
+    }
+    if (char === "#" && !quote) {
+      return value.slice(0, index).trim();
+    }
+  }
+  return value.trim();
+}
+
+function normalizeYamlScalar(value: string) {
+  const withoutComment = stripInlineComment(value);
+  const quoted = withoutComment.match(/^(['"])(.*)\1$/);
+  return (quoted?.[2] ?? withoutComment).trim();
+}
+
+function readScalarFromLines(lines: string[], key: string, minIndent: number, maxIndent?: number) {
+  for (const line of lines) {
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    if (indent < minIndent || (maxIndent !== undefined && indent > maxIndent)) continue;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf(":");
+    if (separator < 0) continue;
+    if (trimmed.slice(0, separator).trim() === key) {
+      return normalizeYamlScalar(trimmed.slice(separator + 1));
+    }
+  }
+  return "";
+}
+
+export function readConfigValueFromText(text: string, key: string) {
+  return readScalarFromLines(text.split(/\r?\n/), key, 0, 0);
+}
+
+function readSectionLines(text: string, section: string, sectionIndent: number) {
+  const lines = text.split(/\r?\n/);
+  const sectionPrefix = " ".repeat(sectionIndent);
+  const childIndent = sectionIndent + 2;
+  const block: string[] = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      if (inSection) block.push(line);
+      continue;
+    }
+
+    const isSectionHeader = indent === sectionIndent && trimmed === `${section}:`;
+    if (isSectionHeader) {
+      inSection = true;
+      continue;
+    }
+
+    if (inSection && indent <= sectionIndent && line.startsWith(sectionPrefix) && trimmed.endsWith(":")) {
+      break;
+    }
+
+    if (inSection && indent >= childIndent) {
+      block.push(line);
+    }
+  }
+
+  return block;
+}
+
+export function readConfigNestedValueFromText(text: string, section: string, key: string) {
+  return readScalarFromLines(readSectionLines(text, section, 0), key, 2);
+}
+
+export function readMappedTableConfigFromText(text: string, tableKey: string) {
+  const block = readSectionLines(text, tableKey, 2);
+  return {
+    baseToken: readScalarFromLines(block, "base_token", 4),
+    tableId: readScalarFromLines(block, "table_id", 4)
+  };
+}
+
 export function readConfigValue(key: string) {
   const configPath = getSkillConfigPath();
   if (!existsSync(configPath)) return "";
   const text = readFileSync(configPath, "utf8");
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp(`^\\s*${escaped}:\\s*['"]?([^'"\\n#]+)['"]?`, "m"));
-  return match?.[1]?.trim() ?? "";
+  return readConfigValueFromText(text, key);
 }
 
 export function readConfigNestedValue(section: string, key: string) {
   const configPath = getSkillConfigPath();
   if (!existsSync(configPath)) return "";
   const text = readFileSync(configPath, "utf8");
-  const escapedSection = section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const blockMatch = text.match(new RegExp(`^${escapedSection}:\\s*\\n([\\s\\S]*?)(?=^[a-zA-Z0-9_]+:\\s*$|\\Z)`, "m"));
-  const block = blockMatch?.[1] ?? "";
-  const match = block.match(new RegExp(`^\\s+${escapedKey}:\\s*['"]?([^'"\\n#]+)['"]?`, "m"));
-  return match?.[1]?.trim() ?? "";
+  return readConfigNestedValueFromText(text, section, key);
 }
 
 function readMappedTableConfig(tableKey: string) {
   const mappingPath = `${getSkillRoot()}/config/lark-field-mapping.yaml`;
   if (!existsSync(mappingPath)) return { baseToken: "", tableId: "" };
   const text = readFileSync(mappingPath, "utf8");
-  const escaped = tableKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const blockMatch = text.match(new RegExp(`^  ${escaped}:\\s*\\n([\\s\\S]*?)(?=^  [a-zA-Z0-9_]+:\\s*$|\\Z)`, "m"));
-  const block = blockMatch?.[1] ?? "";
-  return {
-    baseToken: block.match(/^    base_token:\s*(.+)\s*$/m)?.[1]?.trim() ?? "",
-    tableId: block.match(/^    table_id:\s*(.+)\s*$/m)?.[1]?.trim() ?? ""
-  };
+  return readMappedTableConfigFromText(text, tableKey);
 }
 
 export function larkTableConfig(table: LarkTableKey) {
@@ -256,7 +327,7 @@ export function toCandidateResource(record: LarkRecord): CandidateResource {
     status: pickField(fields, ["招募状态"]),
     aiSuggestion: pickField(fields, ["AI建议"]),
     validResume: pickField(fields, ["有效简历"]),
-    scoreBasis: pickField(fields, ["LLM点评", "VM点评", "点评", "评分依据"]),
+    scoreBasis: pickField(fields, ["评分依据", "LLM评分依据", "Agent评分依据"]),
     priceScoreBasis: pickField(fields, ["LLM单价评分依据", "单价评分依据"]),
     qualificationScoreBasis: pickField(fields, ["LLM资历评分依据", "资历评分依据"]),
     comment: pickField(fields, ["LLM点评", "VM点评", "点评"]),
