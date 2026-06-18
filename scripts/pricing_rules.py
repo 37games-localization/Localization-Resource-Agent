@@ -11,6 +11,7 @@ allowed for TEST_MODE or explicit local-rule fallback.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,84 @@ LANG_RULE_FIELDS = {
     "trans_max": ("翻译上限价", "人工翻译上限价", "Translation max"),
     "version": ("规则版本", "版本", "Version"),
     "enabled": ("启用", "是否启用", "Enabled"),
+}
+
+LANG_LABEL_ALIASES = {
+    "zh": "zh-CN",
+    "zh-cn": "zh-CN",
+    "zhcn": "zh-CN",
+    "cn": "zh-CN",
+    "简中": "zh-CN",
+    "简体中文": "zh-CN",
+    "中文": "zh-CN",
+    "chinese": "zh-CN",
+    "simplifiedchinese": "zh-CN",
+    "en": "en",
+    "英语": "en",
+    "英文": "en",
+    "english": "en",
+    "ja": "ja",
+    "jp": "ja",
+    "日语": "ja",
+    "日文": "ja",
+    "japanese": "ja",
+    "ko": "ko",
+    "kr": "ko",
+    "韩语": "ko",
+    "韩文": "ko",
+    "korean": "ko",
+    "vi": "vi",
+    "越南语": "vi",
+    "vietnamese": "vi",
+    "th": "th",
+    "泰语": "th",
+    "thai": "th",
+    "id": "id",
+    "印尼语": "id",
+    "印度尼西亚语": "id",
+    "indonesian": "id",
+    "ms": "ms",
+    "马来语": "ms",
+    "malay": "ms",
+    "ar": "ar",
+    "阿拉伯语": "ar",
+    "arabic": "ar",
+    "de": "de",
+    "德语": "de",
+    "german": "de",
+    "fr": "fr",
+    "法语": "fr",
+    "french": "fr",
+    "it": "it",
+    "意大利语": "it",
+    "italian": "it",
+    "es": "es",
+    "es-la": "es-LA",
+    "esla": "es-LA",
+    "西班牙语": "es",
+    "拉美西语": "es-LA",
+    "spanish": "es",
+    "pl": "pl",
+    "波兰语": "pl",
+    "polish": "pl",
+    "nl": "nl",
+    "荷兰语": "nl",
+    "dutch": "nl",
+    "tr": "tr",
+    "土耳其语": "tr",
+    "turkish": "tr",
+    "pt": "pt",
+    "pt-br": "pt-BR",
+    "ptbr": "pt-BR",
+    "葡萄牙语": "pt",
+    "葡萄牙语br": "pt-BR",
+    "葡萄牙语巴西": "pt-BR",
+    "巴葡": "pt-BR",
+    "portuguese": "pt",
+    "brazilianportuguese": "pt-BR",
+    "ru": "ru",
+    "俄语": "ru",
+    "russian": "ru",
 }
 
 
@@ -69,13 +148,37 @@ def as_float(value: Any, field_name: str, lang_pair: str) -> float:
 
 def normalize_rule_key(raw: Any) -> str:
     text = extract_text(raw)
-    return (
+    text = (
         text.replace(" ", "")
         .replace("＞", ">")
         .replace("→", ">")
+        .replace("到", ">")
         .replace("－", "-")
         .strip()
     )
+    text = re.sub(r"[（(]\s*BR\s*[）)]", "BR", text, flags=re.IGNORECASE)
+    text = text.replace("＞", ">")
+    if ">" not in text:
+        return normalize_language_label(text)
+    parts = [part for part in text.split(">") if part]
+    if len(parts) != 2:
+        return text
+    return f"{normalize_language_label(parts[0])}>{normalize_language_label(parts[1])}"
+
+
+def normalize_language_label(raw: Any) -> str:
+    text = extract_text(raw)
+    key = (
+        text.lower()
+        .replace(" ", "")
+        .replace("_", "-")
+        .replace("（", "(")
+        .replace("）", ")")
+        .replace("(br)", "br")
+        .replace("(巴西)", "巴西")
+        .strip()
+    )
+    return LANG_LABEL_ALIASES.get(key, text.strip())
 
 
 def is_enabled(fields: dict) -> bool:

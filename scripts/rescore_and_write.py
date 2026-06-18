@@ -19,6 +19,7 @@ AI 彻底退出评分和写入环节，只做最后的「点评」文字生成�
 import sys
 import json
 import time
+import re
 import argparse
 import subprocess
 from pathlib import Path
@@ -152,6 +153,7 @@ def fetch_all_records():
 
 def write_record(record_id: str, fields: dict, dry_run: bool):
     """写回单条记录"""
+    fields = normalize_score_write_fields(fields)
     if dry_run:
         score = fields.get(FIELD_SCORE)
         tier  = fields.get(FIELD_TIER)
@@ -166,6 +168,55 @@ def write_record(record_id: str, fields: dict, dry_run: bool):
         "--record-id", record_id,
         "--json", payload,
     )
+
+
+def clean_business_text(value) -> str:
+    """Remove workflow decorations from values before writing business fields."""
+    text = extract_text(value)
+    text = re.sub(r"\s*(?:✅|❌|⚠️).*?$", "", text).strip()
+    text = re.sub(r"\s+\[[^\]]*(?:done|failed|skipped|seconds?|秒|s)\][^\n\r]*$", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"\s+(?:done|failed|skipped|success)\b.*$", "", text, flags=re.IGNORECASE).strip()
+    return text
+
+
+def normalize_tier_label(value) -> str:
+    text = clean_business_text(value).upper()
+    match = re.search(r"\b([SABCD])\b", text)
+    if match:
+        return match.group(1)
+    compact = re.sub(r"[^SABCD]", "", text)
+    return compact[:1] if compact else clean_business_text(value)
+
+
+def normalize_valid_resume_label(value) -> str:
+    text = clean_business_text(value)
+    if text in {"是", "否"}:
+        return text
+    lowered = text.lower()
+    if any(token in lowered for token in ("false", "no", "invalid", "无效")) or "❌" in extract_text(value):
+        return "否"
+    if any(token in lowered for token in ("true", "yes", "valid", "有效")) or "✅" in extract_text(value):
+        return "是"
+    return text
+
+
+def normalize_score_write_fields(fields: dict) -> dict:
+    """Return Lark writeback payload with clean, option-compatible values."""
+    cleaned = dict(fields)
+    if FIELD_TIER in cleaned:
+        cleaned[FIELD_TIER] = normalize_tier_label(cleaned[FIELD_TIER])
+    if FIELD_VALID in cleaned:
+        cleaned[FIELD_VALID] = normalize_valid_resume_label(cleaned[FIELD_VALID])
+    if FIELD_AI_SUGGEST in cleaned:
+        cleaned[FIELD_AI_SUGGEST] = clean_business_text(cleaned[FIELD_AI_SUGGEST])
+    if FIELD_SCORE in cleaned:
+        try:
+            cleaned[FIELD_SCORE] = float(cleaned[FIELD_SCORE])
+            if cleaned[FIELD_SCORE].is_integer():
+                cleaned[FIELD_SCORE] = int(cleaned[FIELD_SCORE])
+        except (TypeError, ValueError):
+            pass
+    return cleaned
 
 
 # ── PDF 解析 ──────────────────────────────────────────────────────────────────

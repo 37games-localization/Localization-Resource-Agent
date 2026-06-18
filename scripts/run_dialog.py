@@ -281,6 +281,18 @@ def extract_summary(text: str) -> dict:
             # 清理末尾的 ✅ [time] 等工作流注释
             val = re.sub(r'\s*✅.*$', '', val, flags=re.DOTALL).strip()
             val = re.sub(r'\s+\[.*$', '', val).strip()
+            val = re.sub(r'\s+(?:done|failed|skipped|success)\b.*$', '', val, flags=re.IGNORECASE).strip()
+            if key == "tier":
+                tier_match = re.search(r"\b([SABCD])\b", val.upper())
+                if tier_match:
+                    val = tier_match.group(1)
+            if key == "valid_resume":
+                raw_val = val
+                lowered = raw_val.lower()
+                if "无效" in raw_val or "否" in raw_val or "invalid" in lowered or "false" in lowered or "no" == lowered:
+                    val = "否"
+                elif "有效" in raw_val or "是" in raw_val or "valid" in lowered or "true" in lowered or "yes" == lowered:
+                    val = "是"
             result[key] = val
 
     # 如果 suggestion 为空，根据 tier 推断

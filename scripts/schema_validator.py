@@ -42,6 +42,17 @@ def write_yaml(path: Path, data: dict):
     path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def load_existing_mapping(path: Path = MAPPING_PATH) -> dict:
+    """Load the current confirmed field mapping if it exists.
+
+    The schema checkpoint flow must be able to run before a mapping exists, so
+    missing files are treated as an empty mapping instead of an error.
+    """
+    if not path.exists():
+        return {}
+    return load_yaml(path) or {}
+
+
 def norm(text: str) -> str:
     return "".join(str(text or "").lower().replace("（", "(").replace("）", ")").split())
 
@@ -239,7 +250,33 @@ def match_required_field(field_def: dict, actual_fields: list[dict]) -> tuple[di
     return None, "missing", 0.0
 
 
-def validate_table(table_key: str, base_token: str, table_id: str, actual_fields: list[dict], required_fields: list[dict]) -> dict:
+def field_from_existing_mapping(table_key: str, req: dict, actual_fields: list[dict], existing_mapping: dict | None) -> dict | None:
+    """Return the live field referenced by the confirmed mapping, if still valid."""
+    table_mapping = (existing_mapping or {}).get("tables", {}).get(table_key, {})
+    field_mapping = (table_mapping.get("fields") or {}).get(req.get("key", ""))
+    if not field_mapping:
+        return None
+    mapped_id = field_mapping.get("field_id", "")
+    mapped_name = field_mapping.get("field_name", "") or field_mapping.get("expected_name", "")
+    for field in actual_fields:
+        if mapped_id and field.get("field_id") == mapped_id:
+            return field
+    mapped_name_norm = norm(mapped_name)
+    if mapped_name_norm:
+        for field in actual_fields:
+            if norm(field.get("name", "")) == mapped_name_norm:
+                return field
+    return None
+
+
+def validate_table(
+    table_key: str,
+    base_token: str,
+    table_id: str,
+    actual_fields: list[dict],
+    required_fields: list[dict],
+    existing_mapping: dict | None = None,
+) -> dict:
     mapped = {}
     missing = []
     fuzzy = []
@@ -247,7 +284,11 @@ def validate_table(table_key: str, base_token: str, table_id: str, actual_fields
     matched_actual_ids = set()
 
     for req in required_fields:
-        found, match_type, score = match_required_field(req, actual_fields)
+        found = field_from_existing_mapping(table_key, req, actual_fields, existing_mapping)
+        if found:
+            match_type, score = "existing_mapping", 1.0
+        else:
+            found, match_type, score = match_required_field(req, actual_fields)
         if not found:
             if req.get("required", False) or req.get("create_if_missing", False):
                 missing.append(req)
