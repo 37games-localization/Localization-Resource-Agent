@@ -65,7 +65,9 @@ export function inferCandidateLocator(text: string) {
 }
 
 export function inferAttachmentPaths(text: string) {
-  return Array.from(text.matchAll(/\/Users\/\S+?\.(?:xlsx|pdf|docx)/gi)).map((match) => match[0]);
+  return Array.from(
+    text.matchAll(/(?:\/Users\/|\/tmp\/|\/private\/tmp\/)[^\s"'<>]+?\.(?:xlsx|pdf|docx)/gi)
+  ).map((match) => match[0]);
 }
 
 function payloadText(payload: Record<string, unknown>, key: string) {

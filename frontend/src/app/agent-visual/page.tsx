@@ -59,6 +59,14 @@ type PendingCommand = {
   prompt: string;
 };
 
+type UploadedAttachment = {
+  filename: string;
+  path: string;
+  extension: string;
+  uploadedAt: number;
+  boundCandidateId?: string;
+};
+
 type LarkCandidateResource = {
   recordId: string;
   supplierId?: string;
@@ -95,6 +103,8 @@ type RunMode = NonNullable<AgentRunRequest["mode"]>;
 const BACKEND_PENDING_TEXT = "待后端返回";
 const CHECKPOINT_CONFIRM_ACTION = "写入";
 const CHECKPOINT_MODIFY_ACTION = "modify";
+const TEST_EMAIL_CHECKPOINT_CONTRACT_READY = false;
+const TEST_EMAIL_ATTACHMENT_EXTENSIONS = new Set(["xlsx", "pdf", "docx"]);
 
 function statusFromLark(status: string, badcaseFlag: string): CandidateStatus {
   if (badcaseFlag.includes("⚠️")) return "alert";
@@ -268,6 +278,7 @@ export default function AgentVisualPage() {
   const [runEvents, setRunEvents] = useState<AgentRunEvent[]>([]);
   const [isRunningAgent, setIsRunningAgent] = useState(false);
   const [pendingCommand, setPendingCommand] = useState<PendingCommand | null>(null);
+  const [uploadedAttachments, setUploadedAttachments] = useState<UploadedAttachment[]>([]);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const selected = candidates.find((candidate) => candidate.id === selectedId) ?? null;
@@ -588,10 +599,24 @@ export default function AgentVisualPage() {
     return { type: "record_id", value: candidate.recordId };
   }
 
+  function attachmentExtension(path: string, filename = "") {
+    const source = filename || path;
+    return source.split(".").pop()?.toLowerCase() ?? "";
+  }
+
+  function latestUploadedAttachmentFor(candidate: Candidate, allowedExtensions: Set<string>) {
+    return [...uploadedAttachments]
+      .reverse()
+      .find((attachment) => {
+        const matchesCandidate = !attachment.boundCandidateId || attachment.boundCandidateId === candidate.id;
+        return matchesCandidate && allowedExtensions.has(attachment.extension);
+      });
+  }
+
   async function runAgentCommand(
     text: string,
     candidate?: Candidate,
-    options: { appendOnly?: boolean; action?: AgentRunRequest["action"] } = {}
+    options: { appendOnly?: boolean; action?: AgentRunRequest["action"]; attachments?: string[] } = {}
   ) {
     if (isRunningAgent && !options.appendOnly) return;
     if (!options.appendOnly) {
@@ -608,7 +633,7 @@ export default function AgentVisualPage() {
     const requestBody: AgentRunRequest = {
       message: text,
       candidateLocator: workflowLocator(candidate),
-      attachments: inferAttachmentPaths(text),
+      attachments: options.attachments ?? inferAttachmentPaths(text),
       mode: runMode,
       action: options.action ?? "chat"
     };
@@ -738,11 +763,44 @@ export default function AgentVisualPage() {
       if (!response.ok || !data.ok || !data.path) {
         throw new Error(data.error || "附件上传失败");
       }
+      const filename = data.filename ?? file.name;
+      const attachment: UploadedAttachment = {
+        filename,
+        path: data.path,
+        extension: attachmentExtension(data.path, filename),
+        uploadedAt: Date.now(),
+        boundCandidateId: selected?.id
+      };
+      setUploadedAttachments((items) => [...items, attachment]);
       setChatInput((current) => `${current}${current ? " " : ""}${data.path}`);
-      appendChat("agent", `附件已上传：${data.filename ?? file.name}。发送指令时会带上本地路径。`);
+      appendChat("agent", `附件已上传：${filename}。已绑定到${selected ? `当前候选人 ${selected.name}` : "当前会话"}，后续匹配动作会优先携带该附件。`);
     } catch (error) {
       appendChat("agent", `附件上传失败：${error instanceof Error ? error.message : "未知错误"}`);
     }
+  }
+
+  async function runTestEmailQuickAction() {
+    if (!selected || isRunningAgent) return;
+    const attachment = latestUploadedAttachmentFor(selected, TEST_EMAIL_ATTACHMENT_EXTENSIONS);
+    if (!attachment) {
+      const message = "发测试题需要先上传 .xlsx/.pdf/.docx 附件。请点击“上传附件”后再发测试题。";
+      appendChat("agent", message);
+      handleToast(message);
+      return;
+    }
+
+    if (!TEST_EMAIL_CHECKPOINT_CONTRACT_READY) {
+      const message = `已识别最近上传附件：${attachment.filename}，但当前后端 test-email 路径会跳过邮件预览 checkpoint。按验收规则已停止调用后端，请先修复 test-email checkpoint contract gap。`;
+      appendChat("agent", message);
+      handleToast("已停止调用：test-email checkpoint contract gap");
+      return;
+    }
+
+    await runAgentCommand(
+      `给当前候选人准备测试题邮件 ${attachment.path}`,
+      selected,
+      { action: "test-email", attachments: [attachment.path] }
+    );
   }
 
   async function writeCheckpoint(payload: Record<string, unknown>) {
@@ -1003,7 +1061,7 @@ export default function AgentVisualPage() {
           <div className="quick-actions">
               <button disabled={isRunningAgent} onClick={() => void runCommand("看一下所有还没解析的简历")} type="button">待解析简历</button>
               <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("看当前候选人简历", selected, { action: "resume-evaluate" })} type="button">看当前简历</button>
-              <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("给当前候选人准备测试题邮件", selected, { action: "test-email" })} type="button">发测试题</button>
+              <button disabled={isRunningAgent || !selected} onClick={() => void runTestEmailQuickAction()} type="button">发测试题</button>
               <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("给当前候选人准备合同", selected, { action: "contract-generate" })} type="button">准备合同</button>
               <button disabled={!canEditReview} onClick={() => setCheckpointMode("editing")} title={canEditReview ? "进入真实写回修改" : confirmDisabledReason} type="button">修改结果</button>
             </div>
