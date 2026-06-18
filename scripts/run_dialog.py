@@ -221,6 +221,28 @@ def emit_waiting_input(field: str, prompt: str, *, action: str | None = None, ac
     })
 
 
+def emit_blocked(message: str, raw_output: str = "", *, code: str = "blocked", suggestions: list[str] | None = None):
+    if JSONL_MODE:
+        emit_jsonl_event(
+            "blocked",
+            status="blocked",
+            blocked={
+                "code": code,
+                "message": message,
+                "suggestions": suggestions or [],
+                "raw_output": raw_output[:2000],
+            },
+        )
+        emit_jsonl_event("run_done", status="blocked")
+        return
+    emit({
+        "status": "blocked",
+        "message": message,
+        "suggestions": suggestions or [],
+        "raw_output": raw_output[:2000],
+    })
+
+
 def emit_done(candidate: str, message: str, raw_output: str = ""):
     if JSONL_MODE:
         emit_jsonl_event(
@@ -1072,6 +1094,24 @@ def _run_simple(cmd: list, candidate: str, args=None):
                 )
 
     if result.returncode != 0:
+        action = getattr(args, "command", "simple")
+        if action == "contract" and "合同变量需要人工补充" in raw and "无法交互输入" in raw:
+            emit_waiting_input(
+                "contract_required_variables",
+                "合同模板需要 VM 补充必填变量。请先补齐合同信息表后重试，或在确认可留空时使用 --yes。",
+                action=action,
+                accept=["contract_info_update", "explicit_yes"],
+                candidate=candidate,
+            )
+            return
+        if action == "contract" and "合同模板表中无 AI合同模版 附件" in raw:
+            emit_blocked(
+                "合同模板表缺少 AI合同模版附件，无法生成合同。请 VM 先在合同模板表上传模板附件后重试。",
+                raw,
+                code="missing_contract_template_attachment",
+                suggestions=["在合同模板表补上传 AI合同模版 附件", "重新运行合同生成"],
+            )
+            return
         emit_error(f"脚本执行失败（exit={result.returncode}）", raw)
         return
 
