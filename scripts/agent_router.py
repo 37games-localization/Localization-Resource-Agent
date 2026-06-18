@@ -63,6 +63,7 @@ INTENT_TO_ACTION = {
     "create_test_email": "test-email",
     "mark_test_email_sent": "test-email-mark-sent",
     "create_contract_info_email": "contract-info-email",
+    "mark_contract_info_email_sent": "contract-info-mark-sent",
 }
 
 RECORD_ID_RE = re.compile(r"\b(rec[a-zA-Z0-9]+|\d{8}-\d+|CAN-[A-Za-z0-9-]+)\b")
@@ -148,6 +149,17 @@ def classify_intent(text: str) -> dict[str, Any]:
             "clarification_prompt": "",
         }
 
+    if contract_info_context and sent_action and not formal_contract_context:
+        intent = "mark_contract_info_email_sent"
+        return {
+            "intent": intent,
+            "action": INTENT_TO_ACTION[intent],
+            "confidence": "high",
+            "reason": "识别到签约信息收集/签约邀请邮件上下文和已发送语义。",
+            "clarification_required": False,
+            "clarification_prompt": "",
+        }
+
     if contract_info_context and create_action and not sent_action and not formal_contract_context:
         intent = "create_contract_info_email"
         return {
@@ -177,6 +189,16 @@ def classify_intent(text: str) -> dict[str, Any]:
             "reason": "识别到准备/发送邮件语义，但缺少明确邮件类型。",
             "clarification_required": True,
             "clarification_prompt": "你是要准备测试题邮件，还是签约信息收集邮件？",
+        }
+
+    if sent_action and re.search(r"邮件|邀请|发完", compact):
+        return {
+            "intent": "",
+            "action": "",
+            "confidence": "low",
+            "reason": "识别到已发送语义，但缺少测试邮件或签约信息邮件上下文。",
+            "clarification_required": True,
+            "clarification_prompt": "你是要标记测试题邮件已发送，还是签约信息收集邮件已发送？",
         }
 
     return {

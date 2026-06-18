@@ -123,10 +123,6 @@ def infer_chat_command(message: str) -> str | None:
     if intent_result.get("clarification_required"):
         return None
 
-    sent_signal = re.search(r"已发送|已发出|已经发送|已经发出|人工发送|标记.*发送", normalized)
-    contract_info_signal = re.search(r"签约信息|合同信息收集|收集合同信息|签约资料|收款信息", normalized)
-    if sent_signal and contract_info_signal:
-        return "contract-info-mark-sent"
     if re.search(r"签字|签署|核查|检查.*合同|签回", normalized):
         return "signed-contract"
     if re.search(r"badcase|Badcase|坏例|问题回流|标.*问题", normalized):
