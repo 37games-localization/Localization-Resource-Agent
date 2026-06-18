@@ -280,6 +280,7 @@ export default function AgentVisualPage() {
   const [uploadedAttachments, setUploadedAttachments] = useState<UploadedAttachment[]>([]);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const renderedRunDoneMessagesRef = useRef<Set<string>>(new Set());
   const selected = candidates.find((candidate) => candidate.id === selectedId) ?? null;
   const displayCandidate = selected ?? candidates[0] ?? null;
   const waitingCount = candidates.filter((candidate) => candidate.status === "waiting").length;
@@ -320,7 +321,6 @@ export default function AgentVisualPage() {
   const latestCheckpointAllowedActions = checkpointAllowedActions(latestRunCheckpoint);
   const latestCheckpointHasAllowedActions = latestCheckpointAllowedActions.length > 0;
   const checkpointAllowsConfirm = checkpointAllows(latestRunCheckpoint, CHECKPOINT_CONFIRM_ACTION);
-  const checkpointAllowsModify = checkpointAllows(latestRunCheckpoint, CHECKPOINT_MODIFY_ACTION);
   // Display-only summary: these counters must not drive workflow decisions.
   const kpis = [
     ["Lark 候选人记录", String(candidates.length), "blue"],
@@ -356,32 +356,58 @@ export default function AgentVisualPage() {
               : !latestCheckpointToken.startsWith("ckpt-")
                 ? "当前 checkpoint 缺少 CLI token"
                 : "";
-  const canEditReview =
+  const reviewCheckpointIsOpen = checkpointMode === "pending" || checkpointMode === "editing";
+  const canEnterReviewEdit =
     Boolean(latestRunCheckpoint) &&
     checkpointMode === "pending" &&
     latestCheckpointType === "resume" &&
-    checkpointAllowsModify &&
     latestRunMode === "production" &&
     !latestRunHasDryRunFlag &&
     latestCheckpointToken.startsWith("ckpt-") &&
     !isCheckpointWriting;
-  const reviewDisabledReason = !latestRunCheckpoint
+  const canSubmitReviewEdit =
+    Boolean(latestRunCheckpoint) &&
+    reviewCheckpointIsOpen &&
+    latestCheckpointType === "resume" &&
+    latestRunMode === "production" &&
+    !latestRunHasDryRunFlag &&
+    latestCheckpointToken.startsWith("ckpt-") &&
+    !isCheckpointWriting &&
+    Boolean(reviewReason.trim());
+  const reviewEntryDisabledReason = !latestRunCheckpoint
     ? "请先运行并生成 checkpoint"
     : latestCheckpointType === BACKEND_PENDING_TEXT
       ? BACKEND_PENDING_TEXT
     : latestCheckpointType !== "resume"
       ? "当前 checkpoint 不是简历评估写回"
-      : !latestCheckpointHasAllowedActions
-        ? BACKEND_PENDING_TEXT
-        : !checkpointAllowsModify
-          ? "当前 checkpoint 未声明可提交该操作"
-          : latestRunMode !== "production"
-            ? "当前运行模式不是 production"
-            : latestRunHasDryRunFlag
-              ? "事件流显示本次为 dry-run/未写回"
-              : !latestCheckpointToken.startsWith("ckpt-")
-                ? "当前 checkpoint 缺少 CLI token"
-                : "";
+      : latestRunMode !== "production"
+        ? "当前运行模式不是 production"
+        : latestRunHasDryRunFlag
+          ? "事件流显示本次为 dry-run/未写回"
+          : !latestCheckpointToken.startsWith("ckpt-")
+            ? "当前 checkpoint 缺少 CLI token"
+            : isCheckpointWriting
+              ? "正在提交 checkpoint，请稍候"
+              : "";
+  const reviewSubmitDisabledReason = !latestRunCheckpoint
+    ? "请先运行并生成 checkpoint"
+    : latestCheckpointType === BACKEND_PENDING_TEXT
+      ? BACKEND_PENDING_TEXT
+    : latestCheckpointType !== "resume"
+      ? "当前 checkpoint 不是简历评估写回"
+      : !reviewCheckpointIsOpen
+        ? "当前 checkpoint 已处理，不能重复提交修改"
+        : latestRunMode !== "production"
+          ? "当前运行模式不是 production"
+          : latestRunHasDryRunFlag
+            ? "事件流显示本次为 dry-run/未写回"
+            : !latestCheckpointToken.startsWith("ckpt-")
+              ? "当前 checkpoint 缺少 CLI token"
+              : isCheckpointWriting
+                ? "正在提交 checkpoint，请稍候"
+                : !reviewReason.trim()
+                  ? "请填写调整原因"
+                  : "";
   const usageTotalTokens = formatUsageNumber(latestUsage?.total_tokens);
   const usageInputTokens = formatUsageNumber(latestUsage?.input_tokens);
   const usageOutputTokens = formatUsageNumber(latestUsage?.output_tokens);
@@ -531,6 +557,22 @@ export default function AgentVisualPage() {
   }
 
   function appendEventMessage(event: AgentRunEvent) {
+    if (event.event_type === "run_done") {
+      const status = typeof event.payload.status === "string" ? event.payload.status : "";
+      const message = typeof event.payload.message === "string" ? event.payload.message.trim() : "";
+      if (status === "done" && message) {
+        const messageKey = `${event.run_id}:${message}`;
+        if (renderedRunDoneMessagesRef.current.has(messageKey)) return;
+        renderedRunDoneMessagesRef.current.add(messageKey);
+        appendMessage({
+          id: `run-done-${event.run_id}`,
+          role: "agent",
+          kind: "text",
+          text: message
+        });
+      }
+      return;
+    }
     if (event.event_type === "checkpoint") {
       appendMessage({
         role: "agent",
@@ -853,8 +895,8 @@ export default function AgentVisualPage() {
       handleToast("修改结果需要先选中单个候选人");
       return;
     }
-    if (!canEditReview) {
-      handleToast(reviewDisabledReason || "当前执行未闭环，不能提交真实写回");
+    if (!canSubmitReviewEdit) {
+      handleToast(reviewSubmitDisabledReason || "当前执行未闭环，不能提交真实写回");
       return;
     }
     if (!reviewReason.trim()) {
@@ -1007,9 +1049,9 @@ export default function AgentVisualPage() {
               <small>候选人状态来自 Lark 字段，不等同于本次 trace。</small>
             </div>
               <button
-              disabled={!canEditReview}
+              disabled={!canEnterReviewEdit}
               onClick={() => setCheckpointMode("editing")}
-              title={canEditReview ? "进入真实写回修改" : reviewDisabledReason}
+              title={canEnterReviewEdit ? "进入真实写回修改" : reviewEntryDisabledReason}
               type="button"
             >
               修改结果
@@ -1026,7 +1068,8 @@ export default function AgentVisualPage() {
               chatMessages.map((message) => (
                 <ChatTimelineItem
                   canConfirmAdvance={canConfirmAdvance}
-                  canEditReview={canEditReview}
+                  canEnterReviewEdit={canEnterReviewEdit}
+                  canSubmitReviewEdit={canSubmitReviewEdit}
                   checkpointMode={checkpointMode}
                   confirmDisabledReason={confirmDisabledReason}
                   displayCandidate={displayCandidate}
@@ -1035,7 +1078,8 @@ export default function AgentVisualPage() {
                   message={message}
                   onConfirmAdvance={confirmAdvance}
                   onEdit={() => setCheckpointMode("editing")}
-                  reviewDisabledReason={reviewDisabledReason}
+                  reviewEntryDisabledReason={reviewEntryDisabledReason}
+                  reviewSubmitDisabledReason={reviewSubmitDisabledReason}
                   reviewRating={reviewRating}
                   reviewReason={reviewReason}
                   reviewSuggestion={reviewSuggestion}
@@ -1055,7 +1099,7 @@ export default function AgentVisualPage() {
               <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("看当前候选人简历", selected, { action: "resume-evaluate" })} type="button">看当前简历</button>
               <button disabled={isRunningAgent || !selected} onClick={() => void runTestEmailQuickAction()} type="button">发测试题</button>
               <button disabled={isRunningAgent || !selected} onClick={() => selected && void runAgentCommand("给当前候选人准备合同", selected, { action: "contract-generate" })} type="button">准备合同</button>
-              <button disabled={!canEditReview} onClick={() => setCheckpointMode("editing")} title={canEditReview ? "进入真实写回修改" : confirmDisabledReason} type="button">修改结果</button>
+              <button disabled={!canEnterReviewEdit} onClick={() => setCheckpointMode("editing")} title={canEnterReviewEdit ? "进入真实写回修改" : reviewEntryDisabledReason} type="button">修改结果</button>
             </div>
             <form onSubmit={handleSubmit}>
               <button onClick={() => uploadInputRef.current?.click()} type="button">上传附件</button>
@@ -1222,9 +1266,11 @@ function ChatTimelineItem({
   displayCandidate,
   checkpointMode,
   canConfirmAdvance,
-  canEditReview,
+  canEnterReviewEdit,
+  canSubmitReviewEdit,
   confirmDisabledReason,
-  reviewDisabledReason,
+  reviewEntryDisabledReason,
+  reviewSubmitDisabledReason,
   isCheckpointWriting,
   reviewRating,
   reviewSuggestion,
@@ -1241,9 +1287,11 @@ function ChatTimelineItem({
   displayCandidate: Candidate;
   checkpointMode: CheckpointMode;
   canConfirmAdvance: boolean;
-  canEditReview: boolean;
+  canEnterReviewEdit: boolean;
+  canSubmitReviewEdit: boolean;
   confirmDisabledReason: string;
-  reviewDisabledReason: string;
+  reviewEntryDisabledReason: string;
+  reviewSubmitDisabledReason: string;
   isCheckpointWriting: boolean;
   reviewRating: string;
   reviewSuggestion: string;
@@ -1349,7 +1397,7 @@ function ChatTimelineItem({
                 />
               </label>
               <div className="checkpoint-actions">
-              <button disabled={!canEditReview} onClick={submitReview} title={canEditReview ? "提交真实写回" : reviewDisabledReason} type="button">提交修改并记录 Badcase</button>
+              <button disabled={!canSubmitReviewEdit} onClick={submitReview} title={canSubmitReviewEdit ? "提交真实写回" : reviewSubmitDisabledReason} type="button">提交修改并记录 Badcase</button>
                 <button onClick={() => setCheckpointMode("pending")} type="button">取消</button>
               </div>
             </div>
@@ -1358,7 +1406,7 @@ function ChatTimelineItem({
               <button disabled={!canConfirmAdvance} onClick={onConfirmAdvance} title={canConfirmAdvance ? "确认真实写回" : confirmDisabledReason} type="button">
                 {checkpointMode === "confirmed" ? "已确认" : isCheckpointWriting ? "推进中" : "确认推进"}
               </button>
-              <button disabled={!canEditReview} onClick={onEdit} title={canEditReview ? "进入真实写回修改" : reviewDisabledReason} type="button">修改结果</button>
+              <button disabled={!canEnterReviewEdit} onClick={onEdit} title={canEnterReviewEdit ? "进入真实写回修改" : reviewEntryDisabledReason} type="button">修改结果</button>
             </div>
           )}
         </section>
