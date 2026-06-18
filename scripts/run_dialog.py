@@ -498,9 +498,10 @@ def cmd_test_email(args):
         cmd += ["--record-id", record_id]
     elif args.name:
         cmd += ["--name", args.name]
-    # Dialog invocations are non-interactive. Generate a local draft by default
-    # and leave the actual send/status writeback to the explicit mark-sent flow.
-    cmd += ["--file", str(file_path), "--draft", "--yes"]
+    # Keep draft mode, but do not skip send_test_email_v2's Human Decision
+    # checkpoint. VM must preview and confirm "保存草稿" before the draft is
+    # generated.
+    cmd += ["--file", str(file_path), "--draft"]
 
     _run_with_checkpoint(cmd, candidate, args)
 
