@@ -48,6 +48,7 @@ from send_test_email import (
 from rescore_and_write import fetch_all_records
 from config_loader import get_table_ref, load_config, get_lark
 from schema_gate import assert_schema_ready
+from backend_entry_helpers import resume_checkpoint_with_engine, waiting_message_for_rows
 try:
     from field_resolver import load_field_mapping, get_table_mapping
 except Exception:
@@ -508,10 +509,7 @@ def cmd_resume(args):
         print("❌ 请提供 --decision（决策内容，如 '写入' 或 '跳过'）")
         return 1
 
-    # 导入 WorkflowEngine 并调用 resume
-    from workflow_engine import WorkflowEngine
-    engine = WorkflowEngine.__new__(WorkflowEngine)  # 不触发 __init__
-    ok = engine.resume(args.token, args.decision)
+    ok = resume_checkpoint_with_engine(args.token, args.decision)
     if ok:
         print(f"✅ checkpoint {args.token} 已恢复，决策：{args.decision}")
     else:
@@ -554,7 +552,7 @@ def cmd_waiting(args):
         return 1
 
     if not rows:
-        print("\n当前没有等待人工决策的候选人。\n")
+        print(f"\n{waiting_message_for_rows(rows)}。\n")
         return 0
 
     header = f"{'#':<4} {'token':<42} {'候选人':<16} {'节点':<20} {'状态'}"

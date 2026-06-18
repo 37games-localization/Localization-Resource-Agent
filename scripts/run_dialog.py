@@ -33,6 +33,14 @@ SKILL_DIR   = SCRIPTS_DIR.parent
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 from schema_gate import assert_schema_ready
+from backend_entry_helpers import (
+    checkpoint_type_for_command,
+    wait_for_checkpoint_completion,
+    waiting_message_for_rows,
+    waiting_status_for_rows,
+    workflow_runner_resume_command,
+    writeback_fields_for_command,
+)
 
 # ── 工具：结构化输出 ──────────────────────────────────────────────────────────
 
@@ -69,47 +77,11 @@ def build_jsonl_event(event_type: str, *, run_id: str | None = None, payload: di
 
 
 def checkpoint_type_for(command: str, node: str | None = None) -> str:
-    node = node or ""
-    mapping = {
-        "score": "resume",
-        "test-email": "test_email",
-        "contract-info-email": "contract_info_email",
-        "test-email-mark-sent": "test_email",
-        "contract-info-mark-sent": "contract_info_email",
-        "contract": "contract",
-        "signed-contract": "signed_contract",
-        "update-status": "status",
-        "rejection-email": "rejection_email",
-        "badcase": "badcase",
-        "resume": "generic",
-        "waiting": "generic",
-    }
-    if "测试题" in node or "测试邮件" in node:
-        return "test_email"
-    if "签约信息" in node or "合同信息" in node:
-        return "contract_info_email"
-    if "合同" in node:
-        return "contract"
-    if "简历" in node or "评分" in node or "飞书" in node:
-        return "resume"
-    return mapping.get(command, "generic")
+    return checkpoint_type_for_command(command, node)
 
 
 def writeback_fields_for(command: str) -> list[str]:
-    mapping = {
-        "score": ["score", "rating", "valid_resume", "ai_suggestion", "confidence", "resume_valid", "recruitment_status"],
-        "test-email": ["recruitment_status", "workflow_log"],
-        "contract-info-email": ["recruitment_status", "workflow_log"],
-        "test-email-mark-sent": ["recruitment_status", "workflow_log"],
-        "contract-info-mark-sent": ["recruitment_status", "workflow_log"],
-        "contract": ["contract_file", "workflow_log"],
-        "signed-contract": ["recruitment_status", "workflow_log"],
-        "update-status": ["recruitment_status", "workflow_log"],
-        "rejection-email": ["recruitment_status", "workflow_log"],
-        "badcase": ["badcase_snapshot", "workflow_log"],
-        "resume": ["workflow_log"],
-    }
-    return mapping.get(command, ["workflow_log"])
+    return writeback_fields_for_command(command)
 
 
 def error_code_for(message: str) -> str:
@@ -779,13 +751,12 @@ def cmd_resume(args):
         return
 
     # 调用 workflow_runner.py resume 写入决策
-    script = SCRIPTS_DIR / "workflow_runner.py"
-    cmd = [
-        sys.executable, str(script),
-        "resume",
-        "--token",    args.token,
-        "--decision", args.decision,
-    ]
+    cmd = workflow_runner_resume_command(
+        args.token,
+        args.decision,
+        scripts_dir=SCRIPTS_DIR,
+        python_executable=sys.executable,
+    )
 
     if JSONL_MODE:
         emit_jsonl_event(
@@ -812,19 +783,7 @@ def cmd_resume(args):
         return
 
     # 等待后台脚本完成（轮询 checkpoint 文件）
-    ckpt_file = Path.home() / ".loc-resume-checkpoints" / f"{args.token}.json"
-    deadline  = time.time() + 120  # 最多等 2 分钟
-    completed = False
-    while time.time() < deadline:
-        if ckpt_file.exists():
-            try:
-                ckpt_data = json.loads(ckpt_file.read_text(encoding="utf-8"))
-                if ckpt_data.get("status") in ("decided", "done", "completed"):
-                    completed = True
-                    break
-            except Exception:
-                pass
-        time.sleep(1)
+    completed = wait_for_checkpoint_completion(args.token, timeout_seconds=120, poll_seconds=1)
 
     # 根据决策内容生成自然语言结果
     decision = args.decision
@@ -889,13 +848,13 @@ def cmd_waiting(args):
             "waiting_input",
             action=args.command,
             step=args.command,
-            status="waiting" if rows else "empty",
+            status=waiting_status_for_rows(rows),
             field="checkpoint",
             token=None,
             prompt="请选择等待人工决策的 checkpoint 并调用 resume",
             accept=["checkpoint_token", "decision"],
             waiting=rows,
-            message=f"当前有 {len(rows)} 条待决策记录" if rows else "当前没有等待人工决策的候选人",
+            message=waiting_message_for_rows(rows),
         )
         emit_jsonl_event("run_done", status="done", count=len(rows))
         return
@@ -903,7 +862,7 @@ def cmd_waiting(args):
     emit({
         "status": "done",
         "candidate": "",
-        "message": f"当前有 {len(rows)} 条待决策记录" if rows else "当前没有等待人工决策的候选人",
+        "message": waiting_message_for_rows(rows),
         "waiting": rows,
     })
 

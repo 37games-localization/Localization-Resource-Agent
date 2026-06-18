@@ -92,6 +92,9 @@ type LarkCandidateResource = {
 type CheckpointMode = "pending" | "confirmed" | "editing" | "badcaseRecorded";
 type ActiveTab = "overview" | "config";
 type RunMode = NonNullable<AgentRunRequest["mode"]>;
+const BACKEND_PENDING_TEXT = "待后端返回";
+const CHECKPOINT_CONFIRM_ACTION = "写入";
+const CHECKPOINT_MODIFY_ACTION = "modify";
 
 function statusFromLark(status: string, badcaseFlag: string): CandidateStatus {
   if (badcaseFlag.includes("⚠️")) return "alert";
@@ -118,6 +121,34 @@ function nextStepFromStatus(status: string, badcaseFlag: string) {
   if (/不通过/.test(status)) return "发送婉拒邮件";
   if (/测试中/.test(status)) return "等待测试结果";
   return "人工确认";
+}
+
+function backendText(value: unknown) {
+  if (typeof value !== "string") return BACKEND_PENDING_TEXT;
+  const trimmed = value.trim();
+  return trimmed || BACKEND_PENDING_TEXT;
+}
+
+function eventField(event: AgentRunEvent | undefined, key: string) {
+  if (!event) return undefined;
+  const payloadValue = event.payload?.[key];
+  if (payloadValue !== undefined) return payloadValue;
+  return (event as unknown as Record<string, unknown>)[key];
+}
+
+function checkpointTypeFromEvent(event?: AgentRunEvent) {
+  if (event?.event_type !== "checkpoint") return BACKEND_PENDING_TEXT;
+  return backendText(eventField(event, "checkpoint_type") ?? eventField(event, "checkpointType"));
+}
+
+function checkpointAllowedActions(event?: AgentRunEvent) {
+  if (event?.event_type !== "checkpoint") return [];
+  const value = eventField(event, "allowed_actions") ?? eventField(event, "allowedActions");
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function checkpointAllows(event: AgentRunEvent | undefined, action: string) {
+  return checkpointAllowedActions(event).includes(action);
 }
 
 function formatNumberText(value: string, suffix = "") {
@@ -154,7 +185,7 @@ function hasScoreFields(resource: LarkCandidateResource) {
 
 function toVisualCandidate(resource: LarkCandidateResource): Candidate {
   const supplierId = resource.supplierId || resource.recordId;
-  const status = resource.status || "初筛中";
+  const status = resource.status || "";
   const scored = hasScoreFields(resource);
   const wordCount = formatNumberText(resource.parsedWordCount || "", " 字");
   const priceBasis = scored ? resource.priceScoreBasis || "报价规则待确认" : "等待解析后生成";
@@ -175,7 +206,7 @@ function toVisualCandidate(resource: LarkCandidateResource): Candidate {
     lastRun: "Lark 当前状态",
     source: "Lark 候选人表",
     wordCount: scored ? wordCount : "待解析",
-    currentNode: statusToNode(status, scored),
+    currentNode: BACKEND_PENDING_TEXT,
     ruleHit: `${priceBasis} / ${qualificationBasis}`,
     risk: badcaseRisk || (resource.validResume === "否" ? "有效简历=否，建议人工复核" : "无高风险告警"),
     score: resource.score || "-",
@@ -186,7 +217,7 @@ function toVisualCandidate(resource: LarkCandidateResource): Candidate {
     confidenceReason: scored && resource.parsedWordCount
       ? `字数来源：Lark 解析字数 ${wordCount}`
       : "字数来源缺失，建议人工确认",
-    nextStep: scored ? nextStepFromStatus(status, resource.badcaseFlag || "") : "运行简历评估",
+    nextStep: BACKEND_PENDING_TEXT,
     hasScore: scored
   };
 }
@@ -245,6 +276,7 @@ export default function AgentVisualPage() {
   const alertCount = candidates.filter((candidate) => candidate.status === "alert").length;
   const doneCount = candidates.filter((candidate) => candidate.status === "done").length;
   const latestRunCheckpoint = [...runEvents].reverse().find((event) => event.event_type === "checkpoint");
+  const latestCheckpointRunId = latestRunCheckpoint?.run_id ?? "";
   const latestUsageReport = [...runEvents].reverse().find((event) => event.event_type === "usage_report");
   const latestUsage = latestUsageReport?.payload;
   const latestCheckpointSummary = latestRunCheckpoint?.payload.summary as Record<string, unknown> | undefined;
@@ -274,15 +306,12 @@ export default function AgentVisualPage() {
         ? "production，可进入真实写回确认"
         : "非 production，保持只读/预览"
     : "尚无 checkpoint";
-  const latestCheckpointKind = latestCheckpointSummary
-    ? "total_score" in latestCheckpointSummary || "final_tier" in latestCheckpointSummary
-      ? "resume"
-      : "subject" in latestCheckpointSummary || "attachment" in latestCheckpointSummary
-        ? "test-email"
-        : "selected_template" in latestCheckpointSummary || "filled_variables" in latestCheckpointSummary
-          ? "contract"
-          : "generic"
-    : undefined;
+  const latestCheckpointType = checkpointTypeFromEvent(latestRunCheckpoint);
+  const latestCheckpointAllowedActions = checkpointAllowedActions(latestRunCheckpoint);
+  const latestCheckpointHasAllowedActions = latestCheckpointAllowedActions.length > 0;
+  const checkpointAllowsConfirm = checkpointAllows(latestRunCheckpoint, CHECKPOINT_CONFIRM_ACTION);
+  const checkpointAllowsModify = checkpointAllows(latestRunCheckpoint, CHECKPOINT_MODIFY_ACTION);
+  // Display-only summary: these counters must not drive workflow decisions.
   const kpis = [
     ["Lark 候选人记录", String(candidates.length), "blue"],
     ["已写回评分", String(candidates.filter((candidate) => candidate.hasScore).length), "green"],
@@ -294,23 +323,55 @@ export default function AgentVisualPage() {
   const canConfirmAdvance =
     Boolean(latestRunCheckpoint) &&
     checkpointMode === "pending" &&
-    latestCheckpointKind === "resume" &&
+    latestCheckpointType === "resume" &&
+    checkpointAllowsConfirm &&
     latestRunMode === "production" &&
     !latestRunHasDryRunFlag &&
     latestCheckpointToken.startsWith("ckpt-") &&
     !isCheckpointWriting;
   const confirmDisabledReason = !latestRunCheckpoint
     ? "请先运行并生成 checkpoint"
-    : latestCheckpointKind !== "resume"
+    : latestCheckpointType === BACKEND_PENDING_TEXT
+      ? BACKEND_PENDING_TEXT
+    : latestCheckpointType !== "resume"
       ? "当前 checkpoint 不是简历评估写回"
-      : latestRunMode !== "production"
-        ? "当前运行模式不是 production"
-        : latestRunHasDryRunFlag
-          ? "事件流显示本次为 dry-run/未写回"
-          : !latestCheckpointToken.startsWith("ckpt-")
-            ? "当前 checkpoint 缺少 CLI token"
-            : "";
-  const canEditReview = canConfirmAdvance;
+      : !latestCheckpointHasAllowedActions
+        ? BACKEND_PENDING_TEXT
+        : !checkpointAllowsConfirm
+          ? "当前 checkpoint 未声明可提交该操作"
+          : latestRunMode !== "production"
+            ? "当前运行模式不是 production"
+            : latestRunHasDryRunFlag
+              ? "事件流显示本次为 dry-run/未写回"
+              : !latestCheckpointToken.startsWith("ckpt-")
+                ? "当前 checkpoint 缺少 CLI token"
+                : "";
+  const canEditReview =
+    Boolean(latestRunCheckpoint) &&
+    checkpointMode === "pending" &&
+    latestCheckpointType === "resume" &&
+    checkpointAllowsModify &&
+    latestRunMode === "production" &&
+    !latestRunHasDryRunFlag &&
+    latestCheckpointToken.startsWith("ckpt-") &&
+    !isCheckpointWriting;
+  const reviewDisabledReason = !latestRunCheckpoint
+    ? "请先运行并生成 checkpoint"
+    : latestCheckpointType === BACKEND_PENDING_TEXT
+      ? BACKEND_PENDING_TEXT
+    : latestCheckpointType !== "resume"
+      ? "当前 checkpoint 不是简历评估写回"
+      : !latestCheckpointHasAllowedActions
+        ? BACKEND_PENDING_TEXT
+        : !checkpointAllowsModify
+          ? "当前 checkpoint 未声明可提交该操作"
+          : latestRunMode !== "production"
+            ? "当前运行模式不是 production"
+            : latestRunHasDryRunFlag
+              ? "事件流显示本次为 dry-run/未写回"
+              : !latestCheckpointToken.startsWith("ckpt-")
+                ? "当前 checkpoint 缺少 CLI token"
+                : "";
   const usageTotalTokens = formatUsageNumber(latestUsage?.total_tokens);
   const usageInputTokens = formatUsageNumber(latestUsage?.input_tokens);
   const usageOutputTokens = formatUsageNumber(latestUsage?.output_tokens);
@@ -711,18 +772,6 @@ export default function AgentVisualPage() {
       handleToast(message);
       return;
     }
-    if (latestRunCheckpoint && latestCheckpointKind !== "resume") {
-      const message = "当前确认点不是简历评估结果，前端暂未接入该节点的确认写回。为避免误推进状态，请先在命令行或 Lark 中按原流程确认。";
-      appendChat("agent", message);
-      handleToast("该确认点暂未接写回");
-      return;
-    }
-    if (!latestRunCheckpoint || latestCheckpointKind !== "resume") {
-      const message = "请先运行本轮简历评估，并在生成的简历评估 checkpoint 中确认推进。";
-      appendChat("agent", message);
-      handleToast(message);
-      return;
-    }
     if (isCheckpointWriting) return;
     setIsCheckpointWriting(true);
     let checkpointResult: { events?: AgentRunEvent[] } | undefined;
@@ -730,7 +779,7 @@ export default function AgentVisualPage() {
       checkpointResult = await writeCheckpoint({
         action: "confirm",
         checkpointToken: latestCheckpointToken,
-        runId: latestRunCheckpoint.run_id,
+        runId: latestCheckpointRunId,
         mode: latestRunMode
       });
     } catch (error) {
@@ -740,26 +789,10 @@ export default function AgentVisualPage() {
       setIsCheckpointWriting(false);
       return;
     }
-    setCandidates((current) =>
-      current.map((candidate) =>
-        candidate.id === selected.id
-          ? {
-              ...candidate,
-              status: "running",
-              currentNode: "test_email.ready",
-              nextStep: "发送测试题",
-              hasScore: true,
-              score: String(latestCheckpointSummary?.total_score ?? candidate.score),
-              rating: String(latestCheckpointSummary?.final_tier ?? candidate.rating),
-              aiSuggestion: String(latestCheckpointSummary?.ai_suggestion ?? candidate.aiSuggestion)
-            }
-          : candidate
-      )
-    );
     setCheckpointMode("confirmed");
-    appendChat("agent", `已确认 ${selected.name} 的评分结果，并将招募状态推进到测试题待发。`);
-    if (checkpointResult?.events?.length) appendBackendTrace(latestRunCheckpoint.run_id, checkpointResult.events);
-    handleToast("评分结果已确认，状态已推进");
+    if (checkpointResult?.events?.length) appendBackendTrace(latestCheckpointRunId, checkpointResult.events);
+    appendChat("agent", `已提交 ${selected.name} 的确认决策，正在重新拉取后端结果。`);
+    handleToast("确认已提交，等待后端返回");
     await refreshCandidates();
     await refreshWorkflowTraces(selected);
     setIsCheckpointWriting(false);
@@ -770,12 +803,8 @@ export default function AgentVisualPage() {
       handleToast("修改结果需要先选中单个候选人");
       return;
     }
-    if (latestCheckpointKind !== "resume") {
-      handleToast("请先运行本轮简历评估");
-      return;
-    }
     if (!canEditReview) {
-      handleToast(confirmDisabledReason || "当前执行未闭环，不能提交真实写回");
+      handleToast(reviewDisabledReason || "当前执行未闭环，不能提交真实写回");
       return;
     }
     if (!reviewReason.trim()) {
@@ -797,27 +826,14 @@ export default function AgentVisualPage() {
       handleToast(error instanceof Error ? error.message : "Lark 写回失败");
       return;
     }
-    setCandidates((current) =>
-      current.map((candidate) =>
-        candidate.id === selected.id
-          ? {
-              ...candidate,
-              rating: reviewRating,
-              aiSuggestion: reviewSuggestion,
-              status: "alert",
-              risk: `人工调整：${reviewReason}`,
-              currentNode: "badcase.recorded",
-              nextStep: "Badcase 归因",
-              hasScore: true
-            }
-          : candidate
-      )
-    );
     setCheckpointMode("badcaseRecorded");
     if (checkpointResult?.events?.length && latestRunCheckpoint?.run_id) {
       appendBackendTrace(latestRunCheckpoint.run_id, checkpointResult.events);
     }
-    handleToast("已记录人工修改并生成 Badcase");
+    appendChat("agent", `已提交 ${selected.name} 的修改结果，正在重新拉取后端结果。`);
+    handleToast("修改已提交，等待后端返回");
+    await refreshCandidates();
+    await refreshWorkflowTraces(selected);
   }
 
   if (!displayCandidate && activeTab === "overview") {
@@ -943,7 +959,7 @@ export default function AgentVisualPage() {
               <button
               disabled={!canEditReview}
               onClick={() => setCheckpointMode("editing")}
-              title={canEditReview ? "进入真实写回修改" : confirmDisabledReason}
+              title={canEditReview ? "进入真实写回修改" : reviewDisabledReason}
               type="button"
             >
               修改结果
@@ -969,6 +985,7 @@ export default function AgentVisualPage() {
                   message={message}
                   onConfirmAdvance={confirmAdvance}
                   onEdit={() => setCheckpointMode("editing")}
+                  reviewDisabledReason={reviewDisabledReason}
                   reviewRating={reviewRating}
                   reviewReason={reviewReason}
                   reviewSuggestion={reviewSuggestion}
@@ -1150,13 +1167,6 @@ function checkpointSummaryFromEvent(event?: AgentRunEvent) {
   return (event?.payload.summary ?? {}) as Record<string, unknown>;
 }
 
-function checkpointKindFromSummary(summary: Record<string, unknown>) {
-  if ("total_score" in summary || "final_tier" in summary) return "resume";
-  if ("subject" in summary || "attachment" in summary) return "test-email";
-  if ("selected_template" in summary || "filled_variables" in summary) return "contract";
-  return "generic";
-}
-
 function ChatTimelineItem({
   message,
   displayCandidate,
@@ -1164,6 +1174,7 @@ function ChatTimelineItem({
   canConfirmAdvance,
   canEditReview,
   confirmDisabledReason,
+  reviewDisabledReason,
   isCheckpointWriting,
   reviewRating,
   reviewSuggestion,
@@ -1182,6 +1193,7 @@ function ChatTimelineItem({
   canConfirmAdvance: boolean;
   canEditReview: boolean;
   confirmDisabledReason: string;
+  reviewDisabledReason: string;
   isCheckpointWriting: boolean;
   reviewRating: string;
   reviewSuggestion: string;
@@ -1229,7 +1241,7 @@ function ChatTimelineItem({
 
   if (message.kind === "checkpoint") {
     const summary = checkpointSummaryFromEvent(message.event);
-    const kind = checkpointKindFromSummary(summary);
+    const kind = checkpointTypeFromEvent(message.event);
     return (
       <div className="visual-bubble-row agent">
         <div className="bubble-avatar">AI</div>
@@ -1287,7 +1299,7 @@ function ChatTimelineItem({
                 />
               </label>
               <div className="checkpoint-actions">
-                <button disabled={!canEditReview} onClick={submitReview} title={canEditReview ? "提交真实写回" : confirmDisabledReason} type="button">提交修改并记录 Badcase</button>
+              <button disabled={!canEditReview} onClick={submitReview} title={canEditReview ? "提交真实写回" : reviewDisabledReason} type="button">提交修改并记录 Badcase</button>
                 <button onClick={() => setCheckpointMode("pending")} type="button">取消</button>
               </div>
             </div>
@@ -1296,7 +1308,7 @@ function ChatTimelineItem({
               <button disabled={!canConfirmAdvance} onClick={onConfirmAdvance} title={canConfirmAdvance ? "确认真实写回" : confirmDisabledReason} type="button">
                 {checkpointMode === "confirmed" ? "已确认" : isCheckpointWriting ? "推进中" : "确认推进"}
               </button>
-              <button disabled={!canEditReview} onClick={onEdit} title={canEditReview ? "进入真实写回修改" : confirmDisabledReason} type="button">修改结果</button>
+              <button disabled={!canEditReview} onClick={onEdit} title={canEditReview ? "进入真实写回修改" : reviewDisabledReason} type="button">修改结果</button>
             </div>
           )}
         </section>
