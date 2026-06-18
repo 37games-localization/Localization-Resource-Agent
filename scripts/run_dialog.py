@@ -41,6 +41,7 @@ from backend_entry_helpers import (
     workflow_runner_resume_command,
     writeback_fields_for_command,
 )
+from agent_router import classify_intent as classify_router_intent
 
 # ── 工具：结构化输出 ──────────────────────────────────────────────────────────
 
@@ -108,19 +109,24 @@ def error_code_for(message: str) -> str:
     return "cli_error"
 
 
+def classify_chat_intent(message: str) -> dict:
+    """Return the deterministic intent routing contract used by chat entry."""
+    return classify_router_intent(message)
+
+
 def infer_chat_command(message: str) -> str | None:
     """Route natural-language VM input inside the CLI, not in the GUI wrapper."""
     normalized = message.strip()
+    intent_result = classify_chat_intent(normalized)
+    if intent_result.get("action"):
+        return str(intent_result["action"])
+    if intent_result.get("clarification_required"):
+        return None
+
     sent_signal = re.search(r"已发送|已发出|已经发送|已经发出|人工发送|标记.*发送", normalized)
     contract_info_signal = re.search(r"签约信息|合同信息收集|收集合同信息|签约资料|收款信息", normalized)
     if sent_signal and contract_info_signal:
         return "contract-info-mark-sent"
-    if contract_info_signal:
-        return "contract-info-email"
-    if sent_signal and "测试" in normalized:
-        return "test-email-mark-sent"
-    if re.search(r"发.*测试|测试题|测试稿|测试邀请|测试邮件", normalized):
-        return "test-email"
     if re.search(r"签字|签署|核查|检查.*合同|签回", normalized):
         return "signed-contract"
     if re.search(r"badcase|Badcase|坏例|问题回流|标.*问题", normalized):
@@ -694,6 +700,17 @@ def cmd_badcase(args):
 
 def cmd_chat(args):
     """Natural-language CLI entrypoint used by Thin GUI Wrapper."""
+    intent_result = classify_chat_intent(args.message or "")
+    if intent_result.get("clarification_required"):
+        emit_waiting_input(
+            "intent_clarification",
+            str(intent_result.get("clarification_prompt") or "请确认要执行的资源管理动作。"),
+            action="clarification",
+            accept=["test-email", "test-email-mark-sent", "contract-info-email"],
+            candidate=args.name or args.record_id or "",
+        )
+        return
+
     command = infer_chat_command(args.message or "")
     if not command:
         emit_error("无法从 VM 指令中识别要执行的资源管理动作。请明确说明：看简历/评估、发测试题、准备合同，或使用固定按钮。", code="unknown_action")
