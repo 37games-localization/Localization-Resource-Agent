@@ -48,9 +48,17 @@
 
 评分规则配置表是独立规则资产：它可以和候选人主表在同一个 Base，也可以放在单独的规则 Base 中复用。VM 更换简历收集表时，不应默认重建评分规则表；只有评分策略或语言对价格规则变化时才需要切换或维护这张表。
 
+生产启用前必须跑：
+
+```bash
+python3 scripts/verify_pricing_rule_coverage.py
+```
+
+报告中的 `normalized_display_labels` 表示 Agent 已兼容识别的展示标签，例如 `zh-CN>日语` 会归一为 `zh-CN>ja`。这些行可以继续被评分命中，但 VM 应优先把 Lark 表「语言对」列重命名为报告里的 `canonical_key`，避免后续人工维护时误以为缺规则。报告中的 `missing` 是真正缺失的 canonical key，必须新增启用规则，或把现有同义展示标签改名为对应 canonical key 后重跑检查。
+
 | key | 建议表头 | 用途 | 读/写 | 必需 | 影响节点 |
 |---|---|---|---|---:|---|
-| `pricing.language_pair` | 语言对 | 价格规则命中的语言对 key，例如 `zh-CN>en` 或 `简中>英语`。 | 读 | 是 | 评分 |
+| `pricing.language_pair` | 语言对 | 价格规则命中的语言对 key；生产建议使用 canonical key，例如 `zh-CN>en`、`en>de`。展示标签如 `简中>英语` 可被兼容归一，但 preflight 会提示 VM 重命名。 | 读 | 是 | 评分 |
 | `pricing.aipe_target` | AIPE预期价 | AIPE 报价低于或等于该值时价格维度满分。 | 读 | 是 | 评分 |
 | `pricing.aipe_max` | AIPE上限价 | AIPE 报价高于该值时价格维度判为不合格区间。 | 读 | 是 | 评分 |
 | `pricing.translation_target` | 翻译预期价 | 人工翻译报价低于或等于该值时价格维度满分。 | 读 | 是 | 评分 |
@@ -105,6 +113,7 @@
 4. 若要覆盖合同审批/供应商入库，主表需要保留或新增：合同编号、供应商编号。
 5. 若要看板/待决策恢复，必须保留或创建 `Agent流程日志` 表。
 6. 若要 badcase 回流，必须保留：是否Badcase、期望结果。Badcase快照仅为旧流程兼容字段。
+7. 若要切正式评分，必须确认 `verify_pricing_rule_coverage.py` 输出 `ok=true`；如果有 `normalized_display_labels`，优先按报告把展示标签重命名为 canonical key。
 
 ## 当前 Badcase 字段映射
 

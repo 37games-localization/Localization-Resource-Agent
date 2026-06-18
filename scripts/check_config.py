@@ -16,6 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from config_loader import load_config, get_config_path, get_smtp, get_lark, get_llm_api_key, validate_config, is_test_mode, get_test_email, get_table_ref
+from pricing_rules import PricingRulesError, load_price_rules
+from verify_pricing_rule_coverage import build_pricing_rule_coverage_payload, load_pricing_rule_records_for_diagnostics
 
 # ──────────────────────────────────────────────
 # 新增：基础依赖检查
@@ -129,6 +131,28 @@ def pricing_rules_ref_summary(cfg: dict) -> tuple[bool, str]:
         source = "默认简历主表 base_token + rules_table_id"
     base_note = base[:12] + "…" if base else "未配置"
     return True, f"{source}：base={base_note} table={table}"
+
+
+def check_pricing_rule_coverage() -> tuple[bool, str, dict]:
+    """Production preflight: main market pricing rules must be covered."""
+    try:
+        rules, meta = load_price_rules(require_lark_rules=True)
+        records = load_pricing_rule_records_for_diagnostics(meta)
+        payload = build_pricing_rule_coverage_payload(rules, meta, records=records)
+    except PricingRulesError as exc:
+        return False, str(exc), {}
+    except Exception as exc:
+        return False, f"评分规则覆盖检查失败：{exc}", {}
+
+    if payload["ok"]:
+        normalized_count = len(payload.get("normalized_display_labels") or [])
+        note = f"主市场规则覆盖完整（{payload['available_count']}/{payload['required_count']}）"
+        if normalized_count:
+            note += f"，其中 {normalized_count} 条 display label 已兼容归一，建议按 canonical key 重命名"
+        return True, note, payload
+
+    missing = ", ".join(payload.get("missing") or [])
+    return False, f"主市场规则缺失：{missing}", payload
 
 
 # ──────────────────────────────────────────────
@@ -354,6 +378,26 @@ def main():
     if not ok:
         print("\n❌ 评分规则配置缺失，请补齐后重新运行。")
         sys.exit(1)
+
+    if is_test_mode(cfg):
+        print("  ⚠️  pricing coverage preflight：TEST_MODE 暂不阻断；切正式环境前必须通过覆盖检查")
+    else:
+        ok, msg, coverage = check_pricing_rule_coverage()
+        print(f"  {'✅' if ok else '❌'} pricing coverage preflight：{msg}")
+        normalized = coverage.get("normalized_display_labels") if coverage else []
+        if normalized:
+            print("     已兼容归一的 display label（建议 VM 重命名）：")
+            for item in normalized[:8]:
+                print(f"     • {item['display_label']} → {item['canonical_key']}")
+            if len(normalized) > 8:
+                print(f"     • 其余 {len(normalized) - 8} 条见 verify_pricing_rule_coverage.py JSON 输出")
+        if not ok:
+            if coverage:
+                print("     VM remediation：")
+                for step in coverage.get("vm_next_steps", []):
+                    print(f"     • {step}")
+            print("\n❌ 评分规则覆盖不足，请修复后重新运行。")
+            sys.exit(1)
 
     # ── Section 3：SMTP 连通性 ────────────────────────────────
     runtime_failed = False

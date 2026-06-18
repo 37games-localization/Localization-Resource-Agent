@@ -175,8 +175,20 @@ python3 scripts/check_config.py
 - ✅ lark-cli bot 权限正常
 - ✅ LLM api_key 有效
 - ✅ 合同模板目录存在
+- ✅ pricing coverage preflight 通过：主市场评分规则都能命中
 
 如果失败，Agent 不要让 VM 自己排查命令；要指出失败项、需要 VM 提供的信息、以及下一步怎么修。
+
+评分规则覆盖失败时，Agent 先执行：
+
+```bash
+python3 scripts/verify_pricing_rule_coverage.py
+```
+
+然后只按报告指导 VM 修飞书「评分规则配置」表：
+- `missing`：真正缺失的 canonical key，必须新增启用规则，或把已有同义行改名为该 canonical key。
+- `normalized_display_labels`：Agent 已兼容归一的展示标签，例如 `zh-CN>日语 → zh-CN>ja`；评分可以命中，但建议 VM 重命名为 canonical key，避免后续维护误判。
+- 修完后重跑 `python3 scripts/check_config.py`，不要绕过 preflight 直接切正式模式。
 
 ---
 
@@ -307,7 +319,7 @@ badcase_export:
 
 | 想改什么 | 改哪里 |
 |---------|--------|
-| 评分规则、语言对目标价/上限价 | 飞书「评分规则配置」表 |
+| 评分规则、语言对目标价/上限价 | 飞书「评分规则配置」表；生产前以 `verify_pricing_rule_coverage.py` 的 `ok=true` 为准 |
 | 候选人信息、评分字段、合同信息 | 对应 Lark 多维表格 |
 | 合同模板 | 飞书合同模板表 |
 

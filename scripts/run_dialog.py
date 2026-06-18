@@ -97,7 +97,7 @@ def checkpoint_type_for(command: str, node: str | None = None) -> str:
 
 def writeback_fields_for(command: str) -> list[str]:
     mapping = {
-        "score": ["score", "rating", "ai_suggestion", "confidence", "resume_valid", "recruitment_status"],
+        "score": ["score", "rating", "valid_resume", "ai_suggestion", "confidence", "resume_valid", "recruitment_status"],
         "test-email": ["recruitment_status", "workflow_log"],
         "contract-info-email": ["recruitment_status", "workflow_log"],
         "test-email-mark-sent": ["recruitment_status", "workflow_log"],
@@ -271,6 +271,12 @@ TIER_SUGGESTION = {
 }
 
 
+def normalize_score_tier(value: str) -> str:
+    text = str(value or "").strip().upper()
+    match = re.search(r"([SABCD])", text)
+    return match.group(1) if match else text
+
+
 def extract_summary(text: str) -> dict:
     """从脚本 stdout 中提取关键 summary 字段"""
     result = {}
@@ -283,9 +289,7 @@ def extract_summary(text: str) -> dict:
             val = re.sub(r'\s+\[.*$', '', val).strip()
             val = re.sub(r'\s+(?:done|failed|skipped|success)\b.*$', '', val, flags=re.IGNORECASE).strip()
             if key == "tier":
-                tier_match = re.search(r"\b([SABCD])\b", val.upper())
-                if tier_match:
-                    val = tier_match.group(1)
+                val = normalize_score_tier(val)
             if key == "valid_resume":
                 raw_val = val
                 lowered = raw_val.lower()
@@ -297,10 +301,57 @@ def extract_summary(text: str) -> dict:
 
     # 如果 suggestion 为空，根据 tier 推断
     if "suggestion" not in result and "tier" in result:
-        tier_clean = re.sub(r"[^A-Z]", "", result["tier"].upper())
+        tier_clean = normalize_score_tier(result["tier"])
         result["suggestion"] = TIER_SUGGESTION.get(tier_clean, "请人工判断")
 
     return result
+
+
+def score_writeback_from_summary(summary: dict) -> dict:
+    """Build the logical score writeback payload from a checkpoint summary."""
+    writeback = {}
+    raw_score = str(summary.get("total_score", "")).strip()
+    if raw_score:
+        score_text = raw_score.split("/", 1)[0].strip()
+        try:
+            score_value = float(score_text)
+            writeback["score"] = int(score_value) if score_value.is_integer() else score_value
+        except ValueError:
+            writeback["score"] = score_text
+
+    tier = normalize_score_tier(str(summary.get("tier", "")))
+    if tier:
+        writeback["rating"] = tier
+
+    valid_resume = str(summary.get("valid_resume", "")).strip()
+    if valid_resume:
+        writeback["valid_resume"] = "否" if valid_resume in {"否", "无效"} else "是" if valid_resume in {"是", "有效"} else valid_resume
+
+    suggestion = str(summary.get("suggestion", "")).strip()
+    if suggestion:
+        writeback["ai_suggestion"] = suggestion
+
+    return writeback
+
+
+def score_summary_from_checkpoint_file(token: str) -> dict:
+    """Read the saved score checkpoint context without touching Lark."""
+    ckpt_file = Path.home() / ".loc-resume-checkpoints" / f"{token}.json"
+    try:
+        ckpt_data = json.loads(ckpt_file.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    context = ckpt_data.get("context") or {}
+    summary = {}
+    if context.get("总分"):
+        summary["total_score"] = str(context.get("总分"))
+    if context.get("档位"):
+        summary["tier"] = str(context.get("档位"))
+    if context.get("AI建议"):
+        summary["suggestion"] = str(context.get("AI建议"))
+    if context.get("有效简历"):
+        summary["valid_resume"] = str(context.get("有效简历"))
+    return summary
 
 
 def extract_candidate_from_output(text: str, fallback: str) -> str:
@@ -771,6 +822,20 @@ def cmd_resume(args):
         )
     else:
         # 写入等情况，等待完成信号
+        readback_summary = score_summary_from_checkpoint_file(token)
+        readback_fields = score_writeback_from_summary(readback_summary)
+        if JSONL_MODE and readback_fields:
+            emit_jsonl_event(
+                "readback",
+                action=args.command,
+                step=args.command,
+                status="verified",
+                token=token,
+                checkpoint_token=token,
+                checkpoint_type="resume",
+                summary=readback_summary,
+                writeback_fields=readback_fields,
+            )
         if completed:
             emit_done(
                 candidate=token,
@@ -906,6 +971,7 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
     # ── 输出结果 ──────────────────────────────────────────────────────────────
     if checkpoint_found:
         summary = extract_summary(raw_output)
+        writeback_preview = score_writeback_from_summary(summary) if checkpoint_type_for(args.command, checkpoint_node) == "resume" else {}
         candidate_display = extract_candidate_from_output(raw_output, candidate)
         options = ["写入", "跳过", "退出"]
         if checkpoint_node and ("测试题邮件" in checkpoint_node or "签约信息收集邮件" in checkpoint_node):
@@ -923,6 +989,7 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
                 title=checkpoint_node,
                 candidate={"name": candidate_display},
                 summary=summary,
+                writeback_preview=writeback_preview,
                 allowed_actions=options,
                 writeback_fields=writeback_fields_for(args.command),
                 mode_effective="cli",
@@ -936,6 +1003,7 @@ def _run_with_checkpoint(cmd: list, candidate: str, args):
             "node":              checkpoint_node,
             "candidate":         candidate_display,
             "summary":           summary,
+            "writeback_preview": writeback_preview,
             "options":           options,
             "raw_output":        raw_output[:2000],
         })

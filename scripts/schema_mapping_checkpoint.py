@@ -457,6 +457,31 @@ def print_result(payload: dict[str, Any], json_only: bool = False) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
+def cli_error_payload(exc: Exception) -> dict[str, Any]:
+    message = str(exc) or exc.__class__.__name__
+    summary = "\n".join([
+        "Schema Mapping Checkpoint 执行失败",
+        f"状态：blocked",
+        "",
+        f"原因：{message}",
+        "",
+        "给 VM 的建议：先确认当前表配置和依赖可用，再重新运行 propose。",
+    ])
+    return {
+        "ok": False,
+        "status": "blocked",
+        "error": message,
+        "error_type": exc.__class__.__name__,
+        "summary": summary,
+        "vm_action": "确认 config.local.yaml 中目标表配置正确，且本机依赖和 Lark 权限可用后重试。",
+        "suggestions": [
+            "检查 candidate / pricing_rules 的 base_token 与 table_id 是否指向当前生产表。",
+            "如提示缺少依赖，先补齐本机 Python 依赖后再运行。",
+            "如果是 Lark 权限或字段读取失败，请让表管理员确认当前账号有读字段权限。",
+        ],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Human-confirmed Lark schema mapping checkpoint")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -479,12 +504,17 @@ def main() -> int:
     p_confirm.add_argument("--json", action="store_true", help="仅输出 JSON")
 
     args = parser.parse_args()
-    if args.command == "propose":
-        payload = propose(args)
-    elif args.command == "adjust":
-        payload = adjust(args)
-    else:
-        payload = confirm(args)
+    try:
+        if args.command == "propose":
+            payload = propose(args)
+        elif args.command == "adjust":
+            payload = adjust(args)
+        else:
+            payload = confirm(args)
+    except Exception as exc:
+        payload = cli_error_payload(exc)
+        print_result(payload, json_only=getattr(args, "json", False))
+        return 1
     print_result(payload, json_only=getattr(args, "json", False))
     return 0 if payload.get("status") != "blocked" and payload.get("ok", True) is not False else 1
 

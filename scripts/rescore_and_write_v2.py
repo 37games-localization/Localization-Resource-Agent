@@ -46,6 +46,7 @@ from rescore_and_write import (
     GAME_KEYWORDS,
     LANG_PAIR_MAP, FLEX_MAP,
     lark_cli, fetch_all_records, write_record,
+    normalize_score_write_fields,
     extract_pdf_text, extract_lang_pair, extract_float, extract_flex,
     extract_text, build_candidate, build_score_basis, build_ai_suggest,
 )
@@ -199,22 +200,22 @@ def process_one(
             )
         )
 
-    write_fields = {
+    write_fields = normalize_score_write_fields({
         FIELD_SCORE:       final_score,
         FIELD_TIER:        final_tier,
         FIELD_SCORE_BASIS: score_basis,
         FIELD_AI_SUGGEST:  ai_suggest,
         FIELD_VALID:       valid_label,
-    }
+    })
 
     # ── Step 7: Human Decision 节点（仅 interactive 模式）────────────────────
     if interactive:
         ckpt_context = {
             "候选人":   name,
-            "总分":     f"{final_score}/100",
-            "档位":     final_tier,
-            "AI建议":   ai_suggest,
-            "有效简历": valid_label,
+            "总分":     f"{write_fields[FIELD_SCORE]}/100",
+            "档位":     write_fields[FIELD_TIER],
+            "AI建议":   write_fields[FIELD_AI_SUGGEST],
+            "有效简历": write_fields[FIELD_VALID],
             "DRY-RUN":  "是（不会实际写入）" if dry_run else "否（将写入飞书）",
         }
 
